@@ -94,11 +94,21 @@ The camera/gallery accepts any readable image without a pixel or input-file-size
 
 ### Existing Worker deployment
 
-The GitHub Actions workflow is gated: automatic deployments remain disabled until the repository variable `CLOUDFLARE_WORKER_DEPLOY_ENABLED` is set to `true`. Manual `workflow_dispatch` is available, and the job first checks the account ID and confirms that the existing Worker named `skinsnap` is present. Configure Actions secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` (`6d01b949907068a4764bb639a173e789`); the token needs access to that account’s Workers scripts.
+The GitHub Actions workflow is gated for both pushes and manual `workflow_dispatch`: deployments remain disabled until the repository variable `CLOUDFLARE_WORKER_DEPLOY_ENABLED` is set to `true`; manual dispatch does not bypass it. The job then checks the account ID and confirms that the existing Worker named `skinsnap` is present. Configure Actions secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` (`6d01b949907068a4764bb639a173e789`); the token needs access to that account’s Workers scripts.
 
 The local Wrangler login currently belongs to account `7290552febb1c1d7421aef7a1f87ce62`, not the account `6d01b949907068a4764bb639a173e789` in the supplied dashboard URL. Do not deploy until Wrangler is authenticated to the intended account and the target Worker is verified. `npm run worker:check` is a non-deploying dry run; `npm run worker:dev` runs the Worker locally.
 
 The Supabase schema must be applied manually or with `npx supabase db push` before a Worker deployment. Gemini generates cautious visual observations; Groq generates general morning/evening routine guidance from those observations only. The raw photo is sent to Gemini, not Groq. Both provider keys remain server-side. The Worker additionally requires Supabase and RevenueCat server credentials before analysis can run.
+
+### Restricted development analysis
+
+For end-to-end provider testing before RevenueCat production billing is enabled, the Worker exposes `POST /v1/dev/analysis`. This route is disabled unless `AI_DEV_TEST_ENABLED=true`, requires a valid Supabase bearer session, permits only the exact user UUID in `AI_DEV_TEST_USER_ID`, and shares the analysis ledger with a hard two-attempt rolling 30-day quota. Gemini/Groq keys remain Worker-side; the app never receives provider credentials. Results are saved to the signed-in user's normal history.
+
+Use this only on a separate, non-production development Worker and Supabase test account. Never set the enable flag or allowlisted user ID on the production Worker. For a development Expo build only, set `EXPO_PUBLIC_AI_DEV_TEST_MODE=true`; keep it false/unset in preview and production. The development build still needs an explicit photo consent and authenticated session. RevenueCat billing remains disabled for this test path, and the production `/v1/analysis` endpoint continues to require server-verified active entitlement.
+
+### Reconciling a manually created Supabase schema
+
+Seven tables were reported as manually created, but the live project URL/credentials are not present in this checkout, so their columns, constraints, RLS policies, indexes, functions, and triggers have not been compared. Do not apply the initial migration again or create a reconciliation migration from assumptions. First run the metadata-only query in `supabase/diagnostics/inspect_existing_schema.sql` in the intended Supabase SQL Editor and save its output. It reads schema metadata only, not user or photo data. Compare that output with `supabase/migrations/202610210001_skinsnap_core.sql`; only then prepare a narrowly scoped, idempotent reconciliation migration for the actual differences.
 
 ### Testing purchases
 

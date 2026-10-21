@@ -144,16 +144,19 @@ export async function requestSkinAnalysis(
   photoUri: string,
   photoUploadConsent: boolean,
   idempotencyKey: string,
+  mode: 'premium' | 'development' = 'premium',
 ): Promise<SkinAnalysisResult> {
   if (!photoUploadConsent) {
     throw new AnalysisRequestError('consent-required', 'Confirm photo upload consent before requesting analysis.');
   }
-  const entitlement = await getVerifiedEntitlement();
-  if (!entitlement.active) {
-    if (entitlement.reason === 'inactive' || entitlement.reason === 'preview') {
-      throw new AnalysisRequestError('subscription-required', 'An active, verified SkinSnap subscription is required.');
+  if (mode === 'premium') {
+    const entitlement = await getVerifiedEntitlement();
+    if (!entitlement.active) {
+      if (entitlement.reason === 'inactive' || entitlement.reason === 'preview') {
+        throw new AnalysisRequestError('subscription-required', 'An active, verified SkinSnap subscription is required.');
+      }
+      throw new AnalysisRequestError('service-unavailable', 'Billing verification is unavailable. No photo was uploaded.');
     }
-    throw new AnalysisRequestError('service-unavailable', 'Billing verification is unavailable. No photo was uploaded.');
   }
 
   const url = backendUrl();
@@ -172,7 +175,7 @@ export async function requestSkinAnalysis(
     );
   }
   const token = await getSessionToken();
-  if (!isAnalysisResponseAllowed(entitlement.active, Boolean(url), Boolean(token))) {
+  if (mode === 'premium' && !isAnalysisResponseAllowed(true, Boolean(url), Boolean(token))) {
     if (!token) {
       throw new AnalysisRequestError('authentication-required', 'Sign-in is required before a photo can be sent securely.');
     }
@@ -192,7 +195,7 @@ export async function requestSkinAnalysis(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 45_000);
   try {
-    response = await fetch(`${url}/v1/analysis`, {
+    response = await fetch(`${url}${mode === 'development' ? '/v1/dev/analysis' : '/v1/analysis'}`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,

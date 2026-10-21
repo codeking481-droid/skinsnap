@@ -4,3 +4,6 @@ SUPABASE_SERVICE_ROLE_KEY=never-commit-this
 REVENUECAT_SECRET_API_KEY=never-commit-this
 GEMINI_API_KEY=never-commit-this
 GROQ_API_KEY=never-commit-this
+# Set only on a non-production development Worker; keep the test account allowlisted.
+AI_DEV_TEST_ENABLED=false
+AI_DEV_TEST_USER_ID=your-supabase-auth-user-uuid

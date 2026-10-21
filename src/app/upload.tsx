@@ -92,7 +92,7 @@ export default function UploadScreen() {
       }
 
       if (!photoConsent) {
-        Alert.alert('Consent needed', 'Please confirm that your photo may be processed only after you subscribe and request analysis.');
+        Alert.alert('Consent needed', 'Please confirm that your photo may be securely processed when you request an authorized analysis.');
         return;
       }
 
@@ -225,7 +225,7 @@ export default function UploadScreen() {
 
           <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: photoConsent }} onPress={() => setPhotoConsent((value) => !value)} style={[styles.consentRow, { width: Math.min(width - 30, 420), marginTop: 16 * scale }]}>
             <View style={[styles.checkbox, photoConsent && styles.checkboxActive]}>{photoConsent && <Text style={styles.checkmark}>✓</Text>}</View>
-            <Text style={[styles.consentText, { fontSize: 11 * scale, lineHeight: 16 * scale }]}>I consent to this photo being processed only after I subscribe and request secure analysis.</Text>
+            <Text style={[styles.consentText, { fontSize: 11 * scale, lineHeight: 16 * scale }]}>I consent to this photo being securely processed only when I request an authorized analysis.</Text>
           </Pressable>
 
           <View style={[styles.previewActions, { width: Math.min(width - 30, 420), marginTop: 18 * scale, gap: 12 * scale }]}>

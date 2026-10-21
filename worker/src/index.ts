@@ -5,6 +5,8 @@ interface Env {
   REVENUECAT_SECRET_API_KEY?: string;
   GEMINI_API_KEY?: string;
   GROQ_API_KEY?: string;
+  AI_DEV_TEST_ENABLED?: string;
+  AI_DEV_TEST_USER_ID?: string;
   ALLOWED_ORIGINS?: string;
 }
 
@@ -43,6 +45,7 @@ class ApiError extends Error {
 
 const MAX_ANALYSIS_PHOTO_BYTES = 12 * 1024 * 1024;
 const MONTHLY_ANALYSIS_LIMIT = 20;
+const DEV_ANALYSIS_LIMIT = 2;
 const ENTITLEMENT_ID = 'skinsnap_premium';
 const OBSERVATION_CATEGORIES = new Set([
   'visible-shine',
@@ -340,13 +343,18 @@ async function getStoredAnalysis(env: Env, userId: string, idempotencyKey: strin
   return Array.isArray(rows) && isRecord(rows[0]) ? rows[0] : null;
 }
 
-async function reserveAnalysis(env: Env, userId: string, idempotencyKey: string): Promise<'reserved' | 'existing' | 'limited' | 'retry-limited'> {
+async function reserveAnalysis(
+  env: Env,
+  userId: string,
+  idempotencyKey: string,
+  limit: number,
+): Promise<'reserved' | 'existing' | 'limited' | 'retry-limited'> {
   const response = await databaseRequest(env, 'rpc/reserve_skinsnap_analysis', {
     method: 'POST',
     body: JSON.stringify({
       p_user_id: userId,
       p_idempotency_key: idempotencyKey,
-      p_monthly_limit: MONTHLY_ANALYSIS_LIMIT,
+      p_monthly_limit: limit,
     }),
   });
   const result: unknown = await readJson(response);
@@ -376,16 +384,30 @@ async function markAnalysisFailed(env: Env, userId: string, idempotencyKey: stri
   });
 }
 
-async function handleAnalysis(request: Request, env: Env, user: AuthenticatedUser): Promise<Response> {
+async function handleAnalysis(
+  request: Request,
+  env: Env,
+  user: AuthenticatedUser,
+  mode: 'premium' | 'development' = 'premium',
+): Promise<Response> {
+  if (mode === 'development') {
+    const allowedUserId = env.AI_DEV_TEST_USER_ID?.trim();
+    if (env.AI_DEV_TEST_ENABLED !== 'true' || !allowedUserId) {
+      throw new ApiError(404, 'not-found', 'This API endpoint does not exist.');
+    }
+    if (user.id !== allowedUserId) {
+      throw new ApiError(403, 'development-test-not-authorized', 'This development analysis is limited to its authorized test account.');
+    }
+  }
   const idempotencyKey = request.headers.get('Idempotency-Key')?.trim();
   if (!idempotencyKey || idempotencyKey.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(idempotencyKey)) {
     throw new ApiError(400, 'invalid-idempotency-key', 'A valid Idempotency-Key is required.');
   }
+  if (mode === 'premium') await verifyPremium(env, user.id);
   const contentLength = Number(request.headers.get('Content-Length') ?? 0);
   if (Number.isFinite(contentLength) && contentLength > MAX_ANALYSIS_PHOTO_BYTES + 256 * 1024) {
     throw new ApiError(413, 'photo-too-large', 'The prepared image is too large. Choose a smaller image or retake the photo.');
   }
-  await verifyPremium(env, user.id);
   required(env.GEMINI_API_KEY, 'Gemini');
   required(env.GROQ_API_KEY, 'Groq');
   const form = await request.formData();
@@ -396,7 +418,12 @@ async function handleAnalysis(request: Request, env: Env, user: AuthenticatedUse
   if (!file.size || file.size > MAX_ANALYSIS_PHOTO_BYTES) {
     throw new ApiError(413, 'photo-too-large', 'The prepared image is too large. Choose a smaller image or retake the photo.');
   }
-  const reservation = await reserveAnalysis(env, user.id, idempotencyKey);
+  const reservation = await reserveAnalysis(
+    env,
+    user.id,
+    idempotencyKey,
+    mode === 'development' ? DEV_ANALYSIS_LIMIT : MONTHLY_ANALYSIS_LIMIT,
+  );
   if (reservation === 'limited') {
     throw new ApiError(429, 'rate-limited', 'You have reached the current analysis limit. Try again later.');
   }
@@ -624,6 +651,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (url.pathname === '/v1/subscriptions/yearly-downsell/claim' && request.method === 'POST') return claimDownsell(request, env, user.id);
   if (url.pathname === '/v1/subscriptions/yearly-downsell/dismiss' && request.method === 'POST') return dismissDownsell(request, env, user.id);
   if (url.pathname === '/v1/analysis' && request.method === 'POST') return handleAnalysis(request, env, user);
+  if (url.pathname === '/v1/dev/analysis' && request.method === 'POST') return handleAnalysis(request, env, user, 'development');
   if (url.pathname === '/v1/history' && request.method === 'GET') return handleHistory(env, user.id, url);
   if (url.pathname === '/v1/routine' && request.method === 'GET') return getUserRecord(env, 'routines', user.id);
   if (url.pathname === '/v1/routine' && request.method === 'PUT') return saveUserRecord(request, env, 'routines', user.id);

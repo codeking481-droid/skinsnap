@@ -9,6 +9,7 @@ import { backOrReplace } from '../navigation';
 import { AnalysisRequestError, requestSkinAnalysis } from '../services/analysisApi';
 
 const requestKey = () => `analysis-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const developmentTestMode = process.env.EXPO_PUBLIC_AI_DEV_TEST_MODE === 'true';
 
 export default function AnalysisScreen() {
   const { width, height } = useWindowDimensions();
@@ -41,7 +42,12 @@ export default function AnalysisScreen() {
       if (!photoUri || photoUnavailable) {
         throw new AnalysisRequestError('photo-unavailable', 'Choose a photo again before requesting analysis.');
       }
-      const result = await requestSkinAnalysis(photoUri, photoUploadConsent, idempotencyKey.current);
+      const result = await requestSkinAnalysis(
+        photoUri,
+        photoUploadConsent,
+        idempotencyKey.current,
+        developmentTestMode ? 'development' : 'premium',
+      );
       if (!active.current) return;
       setAnalysisResult(result);
       router.replace('/results');
@@ -89,7 +95,9 @@ export default function AnalysisScreen() {
           </Text>
           <Text style={[styles.subtitle, { fontSize: 12.5 * scale, lineHeight: 18 * scale, marginTop: 7 * scale }]}>
             {busy
-              ? 'Verifying your subscription and requesting analysis from the secure service. No sample results are shown.'
+              ? developmentTestMode
+                ? 'Development-only test: only the server-allowlisted account can request up to two analyses per rolling 30 days. No purchase is made.'
+                : 'Verifying your subscription and requesting analysis from the secure service. No sample results are shown.'
               : errorMessage}
           </Text>
 

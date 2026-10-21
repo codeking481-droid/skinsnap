@@ -12,7 +12,7 @@ on:
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || vars.CLOUDFLARE_WORKER_DEPLOY_ENABLED == 'true'
+    if: vars.CLOUDFLARE_WORKER_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
