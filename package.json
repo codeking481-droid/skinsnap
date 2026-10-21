@@ -50,7 +50,7 @@
     "lint": "eslint .",
     "worker:dev": "wrangler dev --config wrangler.jsonc",
     "worker:check": "wrangler deploy --dry-run --config wrangler.jsonc",
-    "worker:deploy": "wrangler deploy --config wrangler.jsonc"
+    "worker:deploy": "wrangler deploy --config wrangler.jsonc --keep-vars true"
   },
   "private": true
 }
