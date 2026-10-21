@@ -1,6 +1,6 @@
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=replace-with-supabase-publishable-key
-SUPABASE_SERVICE_ROLE_KEY=never-commit-this
+SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key
+SUPABASE_SECRET_KEY=never-commit-this
 REVENUECAT_SECRET_API_KEY=never-commit-this
 GEMINI_API_KEY=never-commit-this
 GROQ_API_KEY=never-commit-this

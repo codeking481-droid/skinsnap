@@ -48,6 +48,8 @@ const BENEFITS = [
   'Progress history and follow-up tracking',
 ];
 
+const developmentTestMode = process.env.EXPO_PUBLIC_AI_DEV_TEST_MODE === 'true';
+
 function hasSecureBackend(): boolean {
   return Boolean(process.env.EXPO_PUBLIC_API_URL?.trim().startsWith('https://'));
 }
@@ -352,6 +354,15 @@ export default function PaywallScreen() {
           </Text>}
           {!hasSession && <Pressable accessibilityRole="button" onPress={() => router.push('/sign-in')} style={[styles.signInButton, { minHeight: 40 * scale, borderRadius: 21 * scale, marginTop: 6 * scale }]}>
             <Text style={[styles.signInText, { fontSize: 11 * scale }]}>Sign in or create an account</Text>
+          </Pressable>}
+
+          {developmentTestMode && hasSession && !downsell && <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Run development-only AI analysis test without purchasing"
+            onPress={() => router.replace('/analysis')}
+            style={[styles.freeButton, { minHeight: 42 * scale, borderRadius: 22 * scale, marginTop: 7 * scale, borderColor: '#A84B70', borderWidth: 1 }]}
+          >
+            <Text style={[styles.freeText, { fontSize: 11.5 * scale }]}>Development-only AI test · no purchase</Text>
           </Pressable>}
 
           {!downsell && <Pressable accessibilityRole="button" onPress={() => void closePaywall()} style={[styles.freeButton, { minHeight: 42 * scale, borderRadius: 22 * scale, marginTop: 7 * scale }]}>

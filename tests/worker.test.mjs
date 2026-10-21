@@ -110,3 +110,70 @@ test('allowlisted development analysis does not require RevenueCat entitlement',
     globalThis.fetch = originalFetch;
   }
 });
+
+test('Supabase publishable and secret key names authenticate and access the database', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (input, init) => {
+    requests.push({ url: String(input), headers: new Headers(init?.headers) });
+    if (String(input).endsWith('/auth/v1/user')) {
+      return new Response(JSON.stringify({ id: 'test-user' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response('[]', {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  try {
+    const response = await worker.fetch(new Request('https://skinsnap.test/v1/profile', {
+      headers: { Authorization: 'Bearer test-session' },
+    }), {
+      SUPABASE_URL: 'https://supabase.test',
+      SUPABASE_PUBLISHABLE_KEY: 'test-publishable-key',
+      SUPABASE_SECRET_KEY: 'test-secret-key',
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).id, 'test-user');
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].headers.get('apikey'), 'test-publishable-key');
+    assert.equal(requests[1].headers.get('apikey'), 'test-secret-key');
+    assert.equal(requests[1].headers.get('authorization'), 'Bearer test-secret-key');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('legacy Supabase anon and service-role key names remain supported', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (input, init) => {
+    requests.push(new Headers(init?.headers));
+    if (String(input).endsWith('/auth/v1/user')) {
+      return new Response(JSON.stringify({ id: 'test-user' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response('[]', {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  try {
+    const response = await worker.fetch(new Request('https://skinsnap.test/v1/profile', {
+      headers: { Authorization: 'Bearer test-session' },
+    }), {
+      SUPABASE_URL: 'https://supabase.test',
+      SUPABASE_ANON_KEY: 'legacy-anon-key',
+      SUPABASE_SERVICE_ROLE_KEY: 'legacy-service-key',
+    });
+    assert.equal(response.status, 200);
+    assert.equal(requests[0].get('apikey'), 'legacy-anon-key');
+    assert.equal(requests[1].get('apikey'), 'legacy-service-key');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

@@ -1,6 +1,8 @@
 interface Env {
   SUPABASE_URL?: string;
+  SUPABASE_PUBLISHABLE_KEY?: string;
   SUPABASE_ANON_KEY?: string;
+  SUPABASE_SECRET_KEY?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
   REVENUECAT_SECRET_API_KEY?: string;
   GEMINI_API_KEY?: string;
@@ -74,6 +76,14 @@ function supabaseUrl(env: Env): string {
   return value.replace(/\/+$/, '');
 }
 
+function supabasePublishableKey(env: Env): string {
+  return required(env.SUPABASE_PUBLISHABLE_KEY ?? env.SUPABASE_ANON_KEY, 'Supabase authentication');
+}
+
+function supabaseSecretKey(env: Env): string {
+  return required(env.SUPABASE_SECRET_KEY ?? env.SUPABASE_SERVICE_ROLE_KEY, 'Supabase server access');
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -100,7 +110,7 @@ async function authenticate(request: Request, env: Env): Promise<AuthenticatedUs
   const token = getBearerToken(request);
   const response = await fetch(`${supabaseUrl(env)}/auth/v1/user`, {
     headers: {
-      apikey: required(env.SUPABASE_ANON_KEY, 'Supabase authentication'),
+      apikey: supabasePublishableKey(env),
       Authorization: `Bearer ${token}`,
     },
   });
@@ -118,7 +128,7 @@ async function authenticate(request: Request, env: Env): Promise<AuthenticatedUs
 }
 
 function supabaseHeaders(env: Env): HeadersInit {
-  const key = required(env.SUPABASE_SERVICE_ROLE_KEY, 'Supabase server access');
+  const key = supabaseSecretKey(env);
   return {
     apikey: key,
     Authorization: `Bearer ${key}`,
@@ -521,7 +531,7 @@ async function saveUserRecord(request: Request, env: Env, table: 'routines' | 'p
 }
 
 async function deleteAccount(env: Env, userId: string): Promise<Response> {
-  const key = required(env.SUPABASE_SERVICE_ROLE_KEY, 'Supabase server access');
+  const key = supabaseSecretKey(env);
   let response: Response;
   try {
     response = await fetch(`${supabaseUrl(env)}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
