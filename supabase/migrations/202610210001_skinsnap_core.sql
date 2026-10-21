@@ -27,12 +27,13 @@ create table if not exists public.analysis_history (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users (id) on delete cascade,
   idempotency_key text not null check (char_length(idempotency_key) between 1 and 128),
-  status text not null check (status in ('processing', 'complete')),
+  status text not null check (status in ('processing', 'complete', 'failed')),
   result jsonb,
   created_at timestamptz not null default now(),
   completed_at timestamptz,
+  attempt_count integer not null default 1 check (attempt_count between 1 and 2),
   unique (user_id, idempotency_key),
-  check ((status = 'processing' and result is null and completed_at is null)
+  check ((status in ('processing', 'failed') and result is null and completed_at is null)
     or (status = 'complete' and result is not null and completed_at is not null))
 );
 create index if not exists analysis_history_user_created_idx
@@ -51,21 +52,47 @@ set search_path = ''
 as $$
 declare
   existing_status text;
+  existing_created_at timestamptz;
+  existing_attempt_count integer;
   recent_count integer;
 begin
   perform pg_advisory_xact_lock(hashtextextended(p_user_id::text, 0));
 
-  select status into existing_status
+  select status, created_at, attempt_count
+    into existing_status, existing_created_at, existing_attempt_count
     from public.analysis_history
     where user_id = p_user_id and idempotency_key = p_idempotency_key;
   if found then
-    return 'existing';
+    if existing_status = 'complete' then
+      return 'existing';
+    end if;
+    if existing_status = 'processing' and existing_created_at >= now() - interval '5 minutes' then
+      return 'existing';
+    end if;
+    if existing_attempt_count >= 2 then
+      update public.analysis_history
+        set status = 'failed', completed_at = null
+        where user_id = p_user_id and idempotency_key = p_idempotency_key
+          and status = 'processing';
+      return 'retry-limited';
+    end if;
+    select coalesce(sum(attempt_count), 0)::integer into recent_count
+      from public.analysis_history
+      where user_id = p_user_id
+        and created_at >= now() - interval '30 days';
+    if recent_count >= p_monthly_limit then
+      return 'limited';
+    end if;
+    update public.analysis_history
+      set status = 'processing', result = null, created_at = now(), completed_at = null,
+          attempt_count = existing_attempt_count + 1
+      where user_id = p_user_id and idempotency_key = p_idempotency_key;
+    return 'reserved';
   end if;
 
-  select count(*) into recent_count
+  select coalesce(sum(attempt_count), 0)::integer into recent_count
     from public.analysis_history
     where user_id = p_user_id
-      and status in ('processing', 'complete')
       and created_at >= now() - interval '30 days';
   if recent_count >= p_monthly_limit then
     return 'limited';

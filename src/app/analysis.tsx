@@ -129,6 +129,10 @@ export default function AnalysisScreen() {
               ? <Pressable accessibilityRole="button" onPress={returnToPlans} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
                 <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>View subscription options</Text></LinearGradient>
               </Pressable>
+              : errorCode === 'retry-limit'
+                ? <Pressable accessibilityRole="button" onPress={returnToUpload} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
+                  <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>Start a new scan</Text></LinearGradient>
+                </Pressable>
               : <Pressable accessibilityRole="button" onPress={retry} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
                 <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>Try secure analysis again</Text></LinearGradient>
               </Pressable>}

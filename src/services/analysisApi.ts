@@ -37,6 +37,7 @@ export type AnalysisErrorCode =
   | 'consent-required'
   | 'photo-unavailable'
   | 'rate-limited'
+  | 'retry-limit'
   | 'invalid-response'
   | 'network-error';
 
@@ -214,6 +215,19 @@ export async function requestSkinAnalysis(
   }
   if (response.status === 429) {
     throw new AnalysisRequestError('rate-limited', 'You have reached the current analysis limit. Try again later.');
+  }
+  if (response.status === 409) {
+    let errorCode: unknown;
+    try {
+      const payload: unknown = await response.json();
+      errorCode = isRecord(payload) ? payload.error : null;
+    } catch {
+      errorCode = null;
+    }
+    if (errorCode === 'analysis-retry-limit') {
+      throw new AnalysisRequestError('retry-limit', 'This request could not be completed after a retry. Start a new scan to try again.');
+    }
+    throw new AnalysisRequestError('service-unavailable', 'This analysis request is still processing. Please retry shortly.');
   }
   if (!response.ok) {
     throw new AnalysisRequestError('service-unavailable', 'The analysis service is unavailable. No result was generated.');

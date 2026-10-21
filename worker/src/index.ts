@@ -75,10 +75,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-async function readJson(response: Response): Promise<unknown> {
+async function readJson(body: Request | Response): Promise<unknown> {
   try {
-    return await response.json();
+    return await body.json();
   } catch {
+    if (body instanceof Request) {
+      throw new ApiError(400, 'invalid-request', 'The request body must be valid JSON.');
+    }
     throw new ApiError(502, 'upstream-invalid-response', 'A connected service returned an invalid response.');
   }
 }
@@ -337,7 +340,7 @@ async function getStoredAnalysis(env: Env, userId: string, idempotencyKey: strin
   return Array.isArray(rows) && isRecord(rows[0]) ? rows[0] : null;
 }
 
-async function reserveAnalysis(env: Env, userId: string, idempotencyKey: string): Promise<'reserved' | 'existing' | 'limited'> {
+async function reserveAnalysis(env: Env, userId: string, idempotencyKey: string): Promise<'reserved' | 'existing' | 'limited' | 'retry-limited'> {
   const response = await databaseRequest(env, 'rpc/reserve_skinsnap_analysis', {
     method: 'POST',
     body: JSON.stringify({
@@ -347,7 +350,7 @@ async function reserveAnalysis(env: Env, userId: string, idempotencyKey: string)
     }),
   });
   const result: unknown = await readJson(response);
-  if (result === 'reserved' || result === 'existing' || result === 'limited') return result;
+  if (result === 'reserved' || result === 'existing' || result === 'limited' || result === 'retry-limited') return result;
   throw new ApiError(503, 'analysis-reservation-failed', 'Could not reserve an analysis request safely.');
 }
 
@@ -360,6 +363,19 @@ async function updateAnalysis(env: Env, userId: string, idempotencyKey: string, 
   });
 }
 
+async function markAnalysisFailed(env: Env, userId: string, idempotencyKey: string): Promise<void> {
+  const query = new URLSearchParams({
+    user_id: `eq.${userId}`,
+    idempotency_key: `eq.${idempotencyKey}`,
+    status: 'eq.processing',
+  });
+  await databaseRequest(env, `analysis_history?${query.toString()}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({ status: 'failed' }),
+  });
+}
+
 async function handleAnalysis(request: Request, env: Env, user: AuthenticatedUser): Promise<Response> {
   const idempotencyKey = request.headers.get('Idempotency-Key')?.trim();
   if (!idempotencyKey || idempotencyKey.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(idempotencyKey)) {
@@ -368,11 +384,6 @@ async function handleAnalysis(request: Request, env: Env, user: AuthenticatedUse
   const contentLength = Number(request.headers.get('Content-Length') ?? 0);
   if (Number.isFinite(contentLength) && contentLength > MAX_ANALYSIS_PHOTO_BYTES + 256 * 1024) {
     throw new ApiError(413, 'photo-too-large', 'The prepared image is too large. Choose a smaller image or retake the photo.');
-  }
-  const existing = await getStoredAnalysis(env, user.id, idempotencyKey);
-  if (existing) {
-    if (existing.status === 'complete' && isRecord(existing.result)) return json(existing.result);
-    throw new ApiError(409, 'request-in-progress', 'This analysis request was already received and is still being processed.');
   }
   await verifyPremium(env, user.id);
   required(env.GEMINI_API_KEY, 'Gemini');
@@ -389,21 +400,36 @@ async function handleAnalysis(request: Request, env: Env, user: AuthenticatedUse
   if (reservation === 'limited') {
     throw new ApiError(429, 'rate-limited', 'You have reached the current analysis limit. Try again later.');
   }
+  if (reservation === 'retry-limited') {
+    throw new ApiError(409, 'analysis-retry-limit', 'This request has used its retry limit. Start a new scan to try again.');
+  }
   if (reservation === 'existing') {
     const conflict = await getStoredAnalysis(env, user.id, idempotencyKey);
     if (conflict?.status === 'complete' && isRecord(conflict.result)) return json(conflict.result);
     throw new ApiError(409, 'request-in-progress', 'This analysis request was already received and is still being processed.');
   }
-  const observations = await analyzeWithGemini(env, file);
-  const routine = await generateRoutineWithGroq(env, observations);
-  const result: AnalysisResult = {
-    ...observations,
-    ...routine,
-    resultId: crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
-  };
-  await updateAnalysis(env, user.id, idempotencyKey, result);
-  return json(result, 201);
+  try {
+    const observations = await analyzeWithGemini(env, file);
+    const routine = await generateRoutineWithGroq(env, observations);
+    const result: AnalysisResult = {
+      ...observations,
+      ...routine,
+      resultId: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+    };
+    await updateAnalysis(env, user.id, idempotencyKey, result);
+    return json(result, 201);
+  } catch (error) {
+    try {
+      await markAnalysisFailed(env, user.id, idempotencyKey);
+    } catch (failureError) {
+      console.error(
+        'SkinSnap could not release the failed analysis reservation',
+        failureError instanceof Error ? failureError.name : 'unknown error',
+      );
+    }
+    throw error;
+  }
 }
 
 async function handleHistory(env: Env, userId: string, url: URL): Promise<Response> {

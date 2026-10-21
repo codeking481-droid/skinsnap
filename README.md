@@ -77,7 +77,7 @@ The Cloudflare Worker is implemented in `worker/src/index.ts` and configured by 
 
 ### Supabase and Cloudflare setup
 
-Apply `supabase/migrations/202610210001_skinsnap_core.sql` to the intended Supabase project before deploying the Worker. It enables RLS on user tables, scopes user-facing policies to `auth.uid()`, denies direct client writes to analysis results and downsell claims, adds an atomic 20-analysis rolling 30-day reservation per account, and creates no photo bucket. The backend stores result JSON only; facial photo files are not persisted.
+Apply `supabase/migrations/202610210001_skinsnap_core.sql` to the intended Supabase project before deploying the Worker. It enables RLS on user tables, scopes user-facing policies to `auth.uid()`, denies direct client writes to analysis results and downsell claims, caps inference attempts at 20 per account in a rolling 30-day window, allows one bounded retry per idempotency key, and creates no photo bucket. The backend stores result JSON only; facial photo files are not persisted.
 
 Configure these **Cloudflare Worker secrets** for the existing `skinsnap` production service. Do not commit or display their values:
 
