@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "skinsnap",
+  "main": "worker/src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "account_id": "6d01b949907068a4764bb639a173e789",
+  "workers_dev": true,
+  "observability": {
+    "enabled": true
+  }
+}
