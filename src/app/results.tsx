@@ -39,6 +39,9 @@ export default function ResultsScreen() {
                 <Text style={[styles.body, { fontSize: 13 * scale, lineHeight: 19 * scale, marginTop: 5 * scale }]}>{analysisResult.summary}</Text>
                 <Text style={[styles.timestamp, { fontSize: 9 * scale, marginTop: 10 * scale }]}>Completed {new Date(analysisResult.createdAt).toLocaleString()}</Text>
               </View>
+              {analysisResult.imageQuality === 'limited' && <View style={[styles.qualityNotice, { borderRadius: 14 * scale, padding: 12 * scale, marginTop: 10 * scale }]}>
+                <Text style={[styles.qualityText, { fontSize: 11 * scale, lineHeight: 16 * scale }]}>Image quality was limited. These observations may miss details; try a clear, front-facing photo in even light for a more useful review.</Text>
+              </View>}
 
               <Text style={[styles.sectionTitle, { fontSize: 17 * scale, marginTop: 18 * scale, marginBottom: 8 * scale }]}>Visible observations</Text>
               {analysisResult.observations.map((observation, index) => (
@@ -82,6 +85,8 @@ const styles = StyleSheet.create({
   pink: { color: '#FF6395' },
   subheading: { color: '#FF95B4', fontFamily: 'InterExtraBold', letterSpacing: 0.8, textAlign: 'center' },
   summary: { width: '100%', backgroundColor: 'rgba(25,16,23,0.93)', borderColor: '#8C3B5B', borderWidth: 1 },
+  qualityNotice: { width: '100%', backgroundColor: 'rgba(69,43,24,0.78)', borderWidth: 1, borderColor: '#A76A40' },
+  qualityText: { color: '#FFE1C2', fontFamily: 'InterMedium' },
   photo: { alignSelf: 'center', borderWidth: 2, borderColor: '#FF6F9D' },
   summaryTitle: { color: '#FFF', fontFamily: 'InterExtraBold' },
   body: { color: '#D8D1DA', fontFamily: 'InterRegular' },

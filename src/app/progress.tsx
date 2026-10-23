@@ -8,6 +8,7 @@ import { loadRoutineProgress, type RoutineProgress } from '../routineStorage';
 import { backOrReplace } from '../navigation';
 import { usePhoto } from '../PhotoContext';
 import { loadAnalysisHistory, type AnalysisHistoryItem, AuthApiError } from '../services/authApi';
+import { getRoutineProgressOwner } from '../services/userDataApi';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const EMPTY_PROGRESS: RoutineProgress = { checkedSteps: [], completedDays: [] };
@@ -20,6 +21,7 @@ export default function ProgressScreen() {
   const [history, setHistory] = useState<AnalysisHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [progressMessage, setProgressMessage] = useState('Loading your saved routine progress…');
   const scale = Math.max(0.9, Math.min(Math.min(width, 520) / 393, 1.08));
 
   const refreshHistory = useCallback(async () => {
@@ -37,9 +39,19 @@ export default function ProgressScreen() {
   useEffect(() => {
     let active = true;
     const historyRequest = setTimeout(() => { void refreshHistory(); }, 0);
-    loadRoutineProgress().then((value) => {
-      if (active) setProgress(value);
-    });
+    void (async () => {
+      try {
+        const owner = await getRoutineProgressOwner();
+        const value = await loadRoutineProgress(owner ?? undefined);
+        if (!active) return;
+        setProgress(value);
+        setProgressMessage(owner
+          ? 'Completion history is saved on this device for your signed-in account.'
+          : 'Completion history is saved on this device.');
+      } catch (error) {
+        if (active) setProgressMessage(error instanceof Error ? error.message : 'Routine progress could not be loaded.');
+      }
+    })();
     return () => {
       active = false;
       clearTimeout(historyRequest);
@@ -66,7 +78,7 @@ export default function ProgressScreen() {
 
       <View style={[styles.card, { borderRadius: 19 * scale, padding: 17 * scale, marginTop: 18 * scale }]}>
         <Text style={[styles.cardTitle, { fontSize: 17 * scale }]}>Routine consistency</Text>
-        <Text style={[styles.copy, { fontSize: 11.5 * scale, lineHeight: 17 * scale, marginTop: 5 * scale }]}>Completed days recorded on this device. Completing all steps is optional; consistency is personal.</Text>
+        <Text style={[styles.copy, { fontSize: 11.5 * scale, lineHeight: 17 * scale, marginTop: 5 * scale }]}>{progressMessage} Completing all steps is optional; consistency is personal.</Text>
         <View style={[styles.week, { marginTop: 19 * scale }]}>
           {DAYS.map((day, index) => {
             const completed = progress.completedDays.includes(weekKeys[index]);
@@ -119,6 +131,9 @@ export default function ProgressScreen() {
 
       <Pressable accessibilityRole="button" onPress={() => router.push('/sign-in')} style={[styles.secondaryButton, { minHeight: 44 * scale, borderRadius: 23 * scale, marginTop: 12 * scale }]}>
         <Text style={[styles.secondaryText, { fontSize: 12 * scale }]}>Account &amp; data settings</Text>
+      </Pressable>
+      <Pressable accessibilityRole="link" onPress={() => router.push('/privacy')} style={[styles.secondaryButton, { minHeight: 44 * scale, borderRadius: 23 * scale, marginTop: 10 * scale }]}>
+        <Text style={[styles.secondaryText, { fontSize: 12 * scale }]}>Privacy information</Text>
       </Pressable>
 
       <Pressable accessibilityRole="button" onPress={() => router.replace('/routine')} style={[styles.cta, { minHeight: 53 * scale, borderRadius: 28 * scale, marginTop: 16 * scale }]}><LinearGradient colors={['#FF6494', '#FF6794', '#FF6B99']} style={styles.ctaFill}><Text style={[styles.ctaText, { fontSize: 16 * scale }]}>Back to my routine</Text></LinearGradient></Pressable>

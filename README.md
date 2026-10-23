@@ -85,8 +85,8 @@ Configure these **Cloudflare Worker secrets** for the existing `skinsnap` produc
 - `SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `REVENUECAT_SECRET_API_KEY`
-- `GEMINI_API_KEY` (already reported as configured)
-- `GROQ_API_KEY` (already reported as configured; the Worker currently uses Gemini)
+- `GEMINI_API_KEY` (required server-side secret; not configured in this checkout)
+- `GROQ_API_KEY` (required server-side secret; not configured in this checkout)
 
 The app also needs `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_SUPABASE_URL`, and `EXPO_PUBLIC_SUPABASE_ANON_KEY`. Copy the Worker HTTPS URL from Cloudflare’s **Settings → Domains & Routes**; a dashboard link does not reveal its `workers.dev` hostname. Fill `.env` from `.env.example` for local development and configure the same public values in the appropriate EAS environment.
 
@@ -96,15 +96,15 @@ The camera/gallery accepts any readable image without a pixel or input-file-size
 
 The GitHub Actions workflow is gated for both pushes and manual `workflow_dispatch`: deployments remain disabled until the repository variable `CLOUDFLARE_WORKER_DEPLOY_ENABLED` is set to `true`; manual dispatch does not bypass it. The job then checks the account ID and confirms that the existing Worker named `skinsnap` is present. Configure Actions secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` (`6d01b949907068a4764bb639a173e789`); the token needs access to that account’s Workers scripts.
 
-The local Wrangler login currently belongs to account `7290552febb1c1d7421aef7a1f87ce62`, not the account `6d01b949907068a4764bb639a173e789` in the supplied dashboard URL. Do not deploy until Wrangler is authenticated to the intended account and the target Worker is verified. `npm run worker:check` is a non-deploying dry run; `npm run worker:dev` runs the Worker locally.
+The local Wrangler login is not authenticated to the account selected by `wrangler.jsonc`. Do not deploy until Wrangler is authenticated to the intended account and the existing target Worker is verified. `npm run worker:check` is a non-deploying dry run; `npm run worker:dev` runs the Worker locally. In this restricted checkout, the dry run currently fails because Wrangler cannot write its user-level log file or read the parent directory; TypeScript and app bundle checks remain available.
 
-The Supabase schema must be applied manually or with `npx supabase db push` before a Worker deployment. Gemini generates cautious visual observations; Groq generates general morning/evening routine guidance from those observations only. The raw photo is sent to Gemini, not Groq. Both provider keys remain server-side. The Worker additionally requires Supabase and RevenueCat server credentials before analysis can run.
+The Supabase schema must be applied manually or with `npx supabase db push` before a Worker deployment. Gemini generates cautious visual observations; Groq generates general morning/evening routine guidance from those observations only. The raw photo is sent to Gemini, not Groq. Both provider keys remain server-side. No API credentials are present in this checkout. The Worker additionally requires Supabase and RevenueCat server credentials before analysis can run.
 
 ### Restricted development analysis
 
-For end-to-end provider testing before RevenueCat production billing is enabled, the Worker exposes `POST /v1/dev/analysis`. This route is disabled unless `AI_DEV_TEST_ENABLED=true`, requires a valid Supabase bearer session, permits only the exact user UUID in `AI_DEV_TEST_USER_ID`, and shares the analysis ledger with a hard two-attempt rolling 30-day quota. Gemini/Groq keys remain Worker-side; the app never receives provider credentials. Results are saved to the signed-in user's normal history.
+For end-to-end provider testing before RevenueCat production billing is enabled, the Worker exposes `POST /v1/dev/analysis`. This route is disabled unless `AI_DEV_TEST_ENABLED=true` and requires a valid Supabase bearer session. Ordinary development testers must match the exact UUID in `AI_DEV_TEST_USER_ID` and remain limited to two charged attempts per rolling 30 days. An optional, separate server-side `AI_ADMIN_TEST_USER_ID` grants the matching authenticated account a configurable `AI_ADMIN_TEST_MONTHLY_LIMIT` (default 20, hard-bounded to 1–100) in the same analysis ledger. The admin cap is a finite inference-attempt safety cap, not an unlimited exemption; each idempotency key also retains its existing two-attempt retry limit. The client cannot assert admin status. At the admin cap, the Worker returns `admin-test-cap-reached` before calling Gemini or Groq. Gemini/Groq keys remain Worker-side; the app never receives provider credentials. Results are saved to the signed-in user's normal history.
 
-Use this only on a separate, non-production development Worker and Supabase test account. Never set the enable flag or allowlisted user ID on the production Worker. For a development Expo build only, set `EXPO_PUBLIC_AI_DEV_TEST_MODE=true`; keep it false/unset in preview and production. The development build still needs an explicit photo consent and authenticated session. RevenueCat billing remains disabled for this test path, and the production `/v1/analysis` endpoint continues to require server-verified active entitlement.
+Use this only on a separate, non-production development Worker and Supabase test account. Never set the enable flag, tester UUID, admin UUID, or admin cap on the production Worker. Configure `AI_ADMIN_TEST_USER_ID` as a Worker-side secret; do not add it to the app or `.env`. Set `AI_ADMIN_TEST_MONTHLY_LIMIT` only as a Worker-side variable or secret. For a development Expo build only, set `EXPO_PUBLIC_AI_DEV_TEST_MODE=true`; keep it false/unset in preview and production. The development build still needs explicit photo consent and an authenticated session. RevenueCat billing remains disabled for this test path, and the production `/v1/analysis` endpoint continues to require server-verified active entitlement and its ordinary account limit.
 
 ### Reconciling a manually created Supabase schema
 

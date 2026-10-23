@@ -15,17 +15,20 @@ export function sanitizeRoutineProgress(value: unknown): RoutineProgress {
   const empty: RoutineProgress = { checkedSteps: [], completedDays: [] };
   if (!value || typeof value !== 'object') return empty;
   const data = value as Record<string, unknown>;
-  const validSteps = new Set([
+  const legacySteps = new Set([
     'Morning-Cleanser', 'Morning-Toner', 'Morning-Serum', 'Morning-Moisturizer', 'Morning-Sunscreen',
     'Evening-Cleanser', 'Evening-Toner', 'Evening-Serum', 'Evening-Moisturizer',
   ]);
+  const validStep = (item: unknown): item is string =>
+    typeof item === 'string'
+    && (legacySteps.has(item) || /^(Morning|Evening)-[1-8]$/.test(item));
   const validDates = (item: unknown): item is string => {
     if (typeof item !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(item)) return false;
     const date = new Date(`${item}T00:00:00Z`);
     return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === item;
   };
   return {
-    checkedSteps: Array.isArray(data.checkedSteps) ? [...new Set(data.checkedSteps.filter((item): item is string => typeof item === 'string' && validSteps.has(item)))] : [],
+    checkedSteps: Array.isArray(data.checkedSteps) ? [...new Set(data.checkedSteps.filter(validStep))] : [],
     completedDays: Array.isArray(data.completedDays) ? [...new Set(data.completedDays.filter(validDates))] : [],
   };
 }

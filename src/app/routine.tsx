@@ -1,171 +1,388 @@
-import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
-import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import { router, useLocalSearchParams } from 'expo-router';
+import Svg, { Circle, Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { loadRoutineProgress, saveRoutineProgress } from '../routineStorage';
 import { backOrReplace } from '../navigation';
-import { loadRoutineProgressFromAccount, syncRoutineProgress } from '../services/userDataApi';
+import { getRoutineProgressOwner } from '../services/userDataApi';
+import { loadAnalysisHistory, type AnalysisHistoryItem } from '../services/authApi';
+import { getVerifiedEntitlement } from '../services/billing';
+import {
+  buildRoutineSteps,
+  filterRoutineGuidance,
+  routineStepIds,
+  routineTip,
+  type RoutinePeriod,
+  type RoutineStep,
+} from '../routinePresentation';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const MORNING = [
-  ['Cleanser', 'Gentle foaming cleanser', 'pump'],
-  ['Toner', 'Hydrating toner', 'toner'],
-  ['Serum', 'Niacinamide serum', 'dropper'],
-  ['Moisturizer', 'Lightweight moisturizer', 'jar'],
-  ['Sunscreen', 'Broad spectrum SPF 30+', 'tube'],
-] as const;
-const EVENING = [
-  ['Cleanser', 'Gentle foaming cleanser', 'pump'],
-  ['Toner', 'Hydrating toner', 'toner'],
-  ['Serum', 'Niacinamide serum', 'dropper'],
-  ['Moisturizer', 'Lightweight moisturizer', 'jar'],
-] as const;
+const developmentTestMode = __DEV__ && process.env.EXPO_PUBLIC_AI_DEV_TEST_MODE === 'true';
+const DEMO_ROUTINE = {
+  morningRoutine: [
+    'Use a gentle cleanser and rinse with lukewarm water.',
+    'Apply a fragrance-free moisturizer.',
+    'Finish with broad-spectrum SPF 30 or higher.',
+  ],
+  eveningRoutine: [
+    'Remove sunscreen and cleanse gently.',
+    'Apply a fragrance-free moisturizer to comfortable, dry skin.',
+  ],
+  precautions: ['Patch test new products and follow their labels.'],
+};
+
+type RoutineGuidance = Pick<AnalysisHistoryItem, 'morningRoutine' | 'eveningRoutine' | 'precautions'>;
 
 export default function RoutineScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const [period, setPeriod] = useState<'Morning' | 'Evening'>('Morning');
+  const params = useLocalSearchParams<{ demo?: string }>();
+  const demoMode = __DEV__ && params.demo === 'true';
+  const [period, setPeriod] = useState<RoutinePeriod>('Morning');
   const [completedDays, setCompletedDays] = useState<string[]>([]);
   const [checked, setChecked] = useState<string[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [syncStatus, setSyncStatus] = useState('Loading your routine…');
+  const [owner, setOwner] = useState<string | null>(null);
+  const [routine, setRoutine] = useState<RoutineGuidance | null>(demoMode ? DEMO_ROUTINE : null);
+  const [safetyNotice, setSafetyNotice] = useState<string | null>(null);
+  const [loading, setLoading] = useState(!demoMode);
+  const [error, setError] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState(demoMode ? 'DEMO MODE · progress is stored on this device' : 'Loading your saved routine…');
+  const [selectedStep, setSelectedStep] = useState<RoutineStep | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [loaded, setLoaded] = useState(demoMode);
+  const scale = Math.max(0.92, Math.min(Math.min(width, 520) / 393, 1.08));
+
+  const morningSteps = useMemo(() => buildRoutineSteps(routine?.morningRoutine ?? [], 'Morning'), [routine]);
+  const eveningSteps = useMemo(() => buildRoutineSteps(routine?.eveningRoutine ?? [], 'Evening'), [routine]);
+  const steps = period === 'Morning' ? morningSteps : eveningSteps;
+  const allStepIds = useMemo(
+    () => routineStepIds(routine?.morningRoutine ?? [], routine?.eveningRoutine ?? []),
+    [routine],
+  );
+
   useEffect(() => {
+    if (demoMode) return undefined;
     let active = true;
-    loadRoutineProgress().then(async (stored) => {
-      if (!active) return;
-      let initial = stored;
+    void (async () => {
       try {
-        const remote = await loadRoutineProgressFromAccount();
-        if (remote) {
-          initial = {
-            checkedSteps: [...new Set([...stored.checkedSteps, ...remote.checkedSteps])],
-            completedDays: [...new Set([...stored.completedDays, ...remote.completedDays])],
-          };
-          setSyncStatus('Account data loaded');
-        } else {
-          setSyncStatus('Saved on this device');
+        const accountId = await getRoutineProgressOwner();
+        const savedProgress = await loadRoutineProgress(accountId ?? undefined);
+        if (!active) return;
+        setOwner(accountId);
+        setChecked(savedProgress.checkedSteps);
+        setCompletedDays(savedProgress.completedDays);
+        if (!accountId) {
+          setRoutine(null);
+          setSyncStatus('Sign in to load account-specific routine history.');
+          setLoaded(true);
+          return;
         }
-      } catch (error) {
-        setSyncStatus(error instanceof Error ? error.message : 'Account sync is unavailable; your local routine is still available.');
+        const entitlement = await getVerifiedEntitlement();
+        if (!entitlement.active && !developmentTestMode) {
+          setRoutine(null);
+          setSyncStatus('A verified subscription is required to view saved AI routine guidance.');
+          setLoaded(true);
+          return;
+        }
+        const history = await loadAnalysisHistory();
+        if (!active) return;
+        const latest = history[0];
+        if (!latest) {
+          setRoutine(null);
+        } else {
+          const morning = filterRoutineGuidance(latest.morningRoutine);
+          const evening = filterRoutineGuidance(latest.eveningRoutine);
+          const precautions = filterRoutineGuidance(latest.precautions);
+          setRoutine({
+            morningRoutine: morning.items,
+            eveningRoutine: evening.items,
+            precautions: precautions.items,
+          });
+          if (morning.removed || evening.removed || precautions.removed) {
+            setSafetyNotice('Some saved guidance was hidden because it did not meet SkinSnap’s non-diagnostic safety standards.');
+          } else {
+            setSafetyNotice(null);
+          }
+        }
+        setSyncStatus('Saved routine and progress are private to this account on this device.');
+        setLoaded(true);
+      } catch (cause) {
+        if (!active) return;
+        setError(cause instanceof Error ? cause.message : 'Your saved routine could not be loaded.');
+        setRoutine(null);
+        setSafetyNotice(null);
+        setLoaded(true);
+      } finally {
+        if (active) setLoading(false);
       }
-      if (!active) return;
-      setChecked(initial.checkedSteps);
-      setCompletedDays(initial.completedDays);
-      setLoaded(true);
-    });
+    })();
     return () => { active = false; };
-  }, []);
+  }, [demoMode, reloadKey]);
+
   useEffect(() => {
-    if (!loaded) return undefined;
+    if (!loaded || demoMode) return undefined;
     const snapshot = { checkedSteps: checked, completedDays };
     const timeout = setTimeout(() => {
-      void (async () => {
-        let localSaveFailed = false;
-        try {
-          await saveRoutineProgress(snapshot);
-        } catch {
-          localSaveFailed = true;
-        }
-        try {
-          const result = await syncRoutineProgress(snapshot);
-          setSyncStatus(localSaveFailed
-            ? result === 'synced' ? 'Account synced; this device could not save a local copy.' : 'Could not save your routine on this device.'
-            : result === 'synced' ? 'Synced securely to your account' : 'Saved on this device');
-        } catch (error) {
-          setSyncStatus(localSaveFailed
-            ? 'Could not save or sync your routine.'
-            : error instanceof Error ? error.message : 'Could not sync your routine. Your local copy is saved.');
-        }
-      })();
-    }, 450);
+      void saveRoutineProgress(snapshot, owner ?? undefined)
+        .then(() => setSyncStatus(owner
+          ? 'Progress saved on this device for your signed-in account.'
+          : 'Progress saved on this device.'))
+        .catch(() => setSyncStatus('Progress could not be saved on this device. Please try again.'));
+    }, 250);
     return () => clearTimeout(timeout);
-  }, [checked, completedDays, loaded]);
-  const scale = Math.max(1, Math.min(Math.min(width, 520) / 393, 1.08));
-  const items = period === 'Morning' ? MORNING : EVENING;
+  }, [checked, completedDays, demoMode, loaded, owner]);
+
   const today = new Date();
-  const currentDay = DAYS[(today.getDay() + 6) % 7];
+  const currentDayIndex = (today.getDay() + 6) % 7;
   const weekStart = new Date(today);
-  weekStart.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+  weekStart.setDate(today.getDate() - currentDayIndex);
   const weekDates = DAYS.map((_, index) => {
     const date = new Date(weekStart);
     date.setDate(weekStart.getDate() + index);
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   });
-  const todayKey = weekDates[DAYS.indexOf(currentDay)];
+  const todayKey = weekDates[currentDayIndex];
+
   const toggleStep = (id: string) => {
     const next = checked.includes(id) ? checked.filter((value) => value !== id) : [...checked, id];
     setChecked(next);
-    const dayComplete = [...MORNING.map((item) => `Morning-${item[0]}`), ...EVENING.map((item) => `Evening-${item[0]}`)].every((stepId) => next.includes(stepId));
-    setCompletedDays((current) => dayComplete ? [...new Set([...current, todayKey])] : current.filter((key) => key !== todayKey));
+    const dayComplete = allStepIds.length > 0 && allStepIds.every((stepId) => next.includes(stepId));
+    setCompletedDays((current) => dayComplete
+      ? [...new Set([...current, todayKey])]
+      : current.filter((key) => key !== todayKey));
   };
-  return <View style={styles.screen}><ScrollView contentContainerStyle={[styles.scroll, { minHeight: height }]} showsVerticalScrollIndicator={false}>
-    <View style={[styles.page, { width: Math.min(width, 520), paddingHorizontal: 21 * scale, paddingTop: Math.max(insets.top, 12 * scale), paddingBottom: Math.max(insets.bottom, 16 * scale) }]}>
-      <LinearGradient colors={['#09070B', '#050509', '#050509']} locations={[0, 0.48, 1]} style={StyleSheet.absoluteFill} pointerEvents="none" />
-      <View style={styles.headingRow}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Back to recommendations" onPress={() => backOrReplace('/recommendations')} style={[styles.back, { width: 44 * scale, height: 44 * scale }]}><Svg width={25 * scale} height={25 * scale} viewBox="0 0 24 24" fill="none" stroke="#FFF" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><Path d="m15 18-6-6 6-6" /></Svg></Pressable>
-        <Text style={[styles.title, { fontSize: 30 * scale, lineHeight: 40 * scale }]}>Your <Text style={styles.pink}>Routine</Text></Text><View style={{ width: 34 * scale }} />
-      </View>
-      <Text style={[styles.demoNotice, { fontSize: 9 * scale, marginTop: 3 * scale }]}>DEMO ROUTINE · GENERAL EXAMPLE, NOT PERSONALISED</Text>
-      <Text accessibilityLiveRegion="polite" style={[styles.syncStatus, { fontSize: 9 * scale, marginTop: 4 * scale }]}>{syncStatus}</Text>
 
-      <View style={[styles.week, { marginTop: 10 * scale }]}>{DAYS.map((day, index) => {
-        const active = completedDays.includes(weekDates[index]);
-        const isToday = day === currentDay;
-        return <View key={day} accessibilityLabel={`${day}${isToday ? ', today' : ''}${active ? ', completed' : ''}`} style={styles.day}>
-          <Text style={[styles.dayLabel, { fontSize: 12 * scale, color: isToday ? '#FF5E94' : '#CBD2DC' }]}>{day}</Text>
-          <View style={[styles.dayCircle, { width: 30 * scale, height: 30 * scale, borderRadius: 16 * scale, borderColor: active ? (isToday ? '#FF5D94' : '#D7E2F0') : day === 'Sun' ? '#62314A' : '#30333B', backgroundColor: isToday && active ? '#FF5D94' : 'transparent', borderWidth: active ? 1.4 : 1.1 }]}>{active && <Svg width={17 * scale} height={17 * scale} viewBox="0 0 24 24" fill="none" stroke={isToday ? '#08090D' : '#FFF'} strokeWidth={2.8} strokeLinecap="round" strokeLinejoin="round"><Path d="m4 12 5 5L20 6" /></Svg>}</View>
-        </View>;
-      })}</View>
+  const reload = useCallback(() => {
+    setError(null);
+    setLoading(true);
+    setLoaded(false);
+    setReloadKey((current) => current + 1);
+  }, []);
+  const startAnalysis = () => router.push('/upload');
+  const formatPeriod = (value: string) => value === 'Morning' ? 'morning' : 'evening';
+  const tip = routineTip(routine?.morningRoutine ?? [], routine?.eveningRoutine ?? [], routine?.precautions ?? []);
 
-      <View style={[styles.tabs, { marginTop: 10 * scale, borderRadius: 21 * scale }]}>
-        <Pressable accessibilityRole="tab" accessibilityState={{ selected: period === 'Morning' }} onPress={() => setPeriod('Morning')} style={[styles.tab, { borderTopLeftRadius: 21 * scale, borderBottomLeftRadius: 21 * scale }, period === 'Morning' && styles.activeTab]}><Text style={[styles.tabText, { fontSize: 14 * scale, color: period === 'Morning' ? '#09090D' : '#F4F3F6' }]}>Morning</Text><SunIcon size={20 * scale} color={period === 'Morning' ? '#09090D' : '#FFF'} /></Pressable>
-        <Pressable accessibilityRole="tab" accessibilityState={{ selected: period === 'Evening' }} onPress={() => setPeriod('Evening')} style={[styles.tab, { borderTopRightRadius: 21 * scale, borderBottomRightRadius: 21 * scale }, period === 'Evening' && styles.activeTab]}><Text style={[styles.tabText, { fontSize: 14 * scale, color: period === 'Evening' ? '#09090D' : '#F4F3F6' }]}>Evening</Text><MoonIcon size={19 * scale} color={period === 'Evening' ? '#09090D' : '#FFF'} /></Pressable>
-      </View>
-
-      <View style={[styles.steps, { gap: 6 * scale, marginTop: 10 * scale }]}>{items.map(([title, detail, product], index) => {
-        const id = `${period}-${title}`;
-        const done = checked.includes(id);
-        return <Pressable key={id} accessibilityRole="checkbox" accessibilityState={{ checked: done }} onPress={() => toggleStep(id)} style={[styles.stepRow, { height: 76 * scale, gap: 6 * scale }]}>
-          <ProductPack type={product} size={74 * scale} />
-          <View style={[styles.productCard, { borderRadius: 15 * scale, paddingHorizontal: 10 * scale, gap: 10 * scale }]}>
-            <View style={[styles.number, { width: 34 * scale, height: 34 * scale, borderRadius: 18 * scale }]}><Text style={[styles.numberText, { fontSize: 20 * scale }]}>{index + 1}</Text></View>
-            <View style={styles.stepCopy}><Text style={[styles.stepTitle, { fontSize: 16 * scale, lineHeight: 21 * scale }]}>{title}</Text><Text style={[styles.stepDetail, { fontSize: 14 * scale, lineHeight: 19 * scale, marginTop: 2 * scale }]}>{detail}</Text></View>
-            {done && <View style={styles.doneDot}><Svg width={12 * scale} height={12 * scale} viewBox="0 0 24 24" fill="none" stroke="#0A090D" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round"><Path d="m4 12 5 5L20 6" /></Svg></View>}
-            <Svg width={17 * scale} height={17 * scale} viewBox="0 0 24 24" fill="none" stroke="#FF6497" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round"><Path d="m9 18 6-6-6-6" /></Svg>
+  return (
+    <View style={styles.screen}>
+      <ScrollView contentContainerStyle={[styles.scroll, { minHeight: height, paddingBottom: Math.max(insets.bottom, 16) + 16 }]} showsVerticalScrollIndicator={false}>
+        <View style={[styles.page, { width: Math.min(width, 520), paddingHorizontal: 21 * scale, paddingTop: Math.max(insets.top, 12 * scale), paddingBottom: 24 * scale }]}>
+          <LinearGradient colors={['#09070B', '#050509', '#050509']} locations={[0, 0.48, 1]} style={StyleSheet.absoluteFill} pointerEvents="none" />
+          <View style={styles.headingRow}>
+            <Pressable accessibilityRole="button" accessibilityLabel="Back to recommendations" onPress={() => backOrReplace('/recommendations')} style={[styles.back, { width: 44 * scale, height: 44 * scale }]}>
+              <Svg width={25 * scale} height={25 * scale} viewBox="0 0 24 24" fill="none" stroke="#FFF" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><Path d="m15 18-6-6 6-6" /></Svg>
+            </Pressable>
+            <Text accessibilityRole="header" style={[styles.title, { fontSize: 30 * scale, lineHeight: 40 * scale }]}>Your <Text style={styles.pink}>Routine</Text></Text>
+            <View style={{ width: 34 * scale }} />
           </View>
-        </Pressable>;
-      })}</View>
 
-      <View style={[styles.proTip, { borderRadius: 16 * scale, padding: 15 * scale, gap: 14 * scale, marginTop: 14 * scale }]}>
-        <View style={[styles.tipIcon, { width: 50 * scale, height: 50 * scale, borderRadius: 13 * scale }]}><TipBulb size={31 * scale} /></View>
-        <View style={styles.tipCopy}><Text style={[styles.tipTitle, { fontSize: 16 * scale, lineHeight: 21 * scale }]}>Pro Tip</Text><Text style={[styles.tipText, { fontSize: 14 * scale, lineHeight: 19 * scale, marginTop: 3 * scale }]}>Follow this routine daily for the best results. Consistency is key!</Text></View>
-      </View>
-      <Pressable accessibilityRole="button" onPress={() => router.push('/progress')} style={[styles.cta, { minHeight: 54 * scale, borderRadius: 28 * scale, marginTop: 14 * scale }]}><LinearGradient colors={['#FF6494', '#FF6794', '#FF6B99']} style={styles.ctaFill}><Text style={[styles.ctaText, { fontSize: 17 * scale }]}>Track My Progress</Text><Svg width={21 * scale} height={21 * scale} viewBox="0 0 24 24" fill="none" stroke="#08090D" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><Path d="M4 12h15m-6-6 6 6-6 6" /></Svg></LinearGradient></Pressable>
+          {demoMode
+            ? <Text style={[styles.demoNotice, { fontSize: 10 * scale, marginTop: 4 * scale }]}>DEMO ROUTINE · GENERAL EXAMPLE, NOT PERSONALIZED</Text>
+            : routine
+              ? <Text style={[styles.demoNotice, { fontSize: 10 * scale, marginTop: 4 * scale }]}>YOUR SAVED AI-ASSISTED GUIDANCE · NON-DIAGNOSTIC</Text>
+              : null}
+          {safetyNotice && <Text accessibilityRole="alert" style={[styles.safetyNotice, { fontSize: 12 * scale, lineHeight: 18 * scale, marginTop: 8 * scale }]}>{safetyNotice}</Text>}
+          <Text accessibilityLiveRegion="polite" style={[styles.syncStatus, { fontSize: 11 * scale, lineHeight: 16 * scale, marginTop: 5 * scale }]}>{syncStatus}</Text>
+
+          {loading ? (
+            <View style={styles.stateCard}>
+              <ActivityIndicator color="#FF6698" />
+              <Text style={styles.stateText}>Loading your saved routine…</Text>
+            </View>
+          ) : error ? (
+            <View style={styles.stateCard}>
+              <Text accessibilityRole="header" style={styles.stateTitle}>Routine unavailable</Text>
+              <Text style={styles.stateText}>{error}</Text>
+              <Pressable accessibilityRole="button" onPress={reload} style={styles.secondaryAction}><Text style={styles.secondaryActionText}>Try again</Text></Pressable>
+            </View>
+          ) : !routine ? (
+            <View style={styles.stateCard}>
+              <Text accessibilityRole="header" style={styles.stateTitle}>No saved AI routine yet</Text>
+              <Text style={styles.stateText}>
+                {owner
+                  ? 'Complete an authorized skin analysis to create routine guidance saved to your account.'
+                  : 'Sign in and complete an authorized skin analysis to see your account-specific routine.'}
+              </Text>
+              <Pressable accessibilityRole="button" onPress={startAnalysis} style={styles.primaryAction}>
+                <Text style={styles.primaryActionText}>{owner ? 'Start a skin analysis' : 'Sign in or start analysis'}</Text>
+              </Pressable>
+              {__DEV__ && <Pressable accessibilityRole="button" onPress={() => router.push({ pathname: '/routine', params: { demo: 'true' } })} style={styles.secondaryAction}><Text style={styles.secondaryActionText}>View labelled demo routine</Text></Pressable>}
+            </View>
+          ) : (
+            <>
+              <View style={[styles.week, { marginTop: 16 * scale }]}>{DAYS.map((day, index) => {
+                const completed = completedDays.includes(weekDates[index]);
+                const isToday = index === currentDayIndex;
+                return (
+                  <View key={day} accessibilityLabel={`${day}${isToday ? ', today' : ''}${completed ? ', completed' : ''}`} style={styles.day}>
+                    <Text style={[styles.dayLabel, { fontSize: 12 * scale, color: isToday ? '#FF5E94' : '#CBD2DC' }]}>{day}</Text>
+                    <View style={[styles.dayCircle, { width: 30 * scale, height: 30 * scale, borderRadius: 16 * scale, borderColor: completed ? (isToday ? '#FF5D94' : '#D7E2F0') : '#38333D', backgroundColor: isToday && completed ? '#FF5D94' : 'transparent' }]}>
+                      {completed && <Svg width={17 * scale} height={17 * scale} viewBox="0 0 24 24" fill="none" stroke={isToday ? '#08090D' : '#FFF'} strokeWidth={2.8} strokeLinecap="round" strokeLinejoin="round"><Path d="m4 12 5 5L20 6" /></Svg>}
+                    </View>
+                  </View>
+                );
+              })}</View>
+
+              <View style={[styles.tabs, { marginTop: 15 * scale, borderRadius: 21 * scale }]}>
+                {(['Morning', 'Evening'] as const).map((value) => (
+                  <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: period === value }} onPress={() => setPeriod(value)} style={[styles.tab, period === value && styles.activeTab]}>
+                    <Text style={[styles.tabText, { fontSize: 14 * scale, color: period === value ? '#09090D' : '#F4F3F6' }]}>{value}</Text>
+                    {value === 'Morning' ? <SunIcon size={20 * scale} color={period === value ? '#09090D' : '#FFF'} /> : <MoonIcon size={19 * scale} color={period === value ? '#09090D' : '#FFF'} />}
+                  </Pressable>
+                ))}
+              </View>
+
+              <Text style={[styles.orderNote, { fontSize: 11 * scale, lineHeight: 17 * scale, marginTop: 12 * scale }]}>
+                Steps are shown in the order returned by your saved routine. Tap a step for its guidance.
+              </Text>
+              {steps.length ? steps.map((step) => {
+                const done = checked.includes(step.id);
+                return (
+                  <View key={step.id} style={[styles.stepRow, { marginTop: 8 * scale }]}>
+                    <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: done }} onPress={() => toggleStep(step.id)} style={[styles.stepCheck, done && styles.stepCheckDone]}>
+                      {done && <Svg width={16 * scale} height={16 * scale} viewBox="0 0 24 24" fill="none" stroke="#08090D" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round"><Path d="m4 12 5 5L20 6" /></Svg>}
+                    </Pressable>
+                    <Pressable accessibilityRole="button" accessibilityLabel={`Step ${step.order}, ${step.title}. Open details`} onPress={() => setSelectedStep(step)} style={styles.stepCard}>
+                      <View style={[styles.number, { width: 34 * scale, height: 34 * scale, borderRadius: 18 * scale }]}><Text style={[styles.numberText, { fontSize: 18 * scale }]}>{step.order}</Text></View>
+                      <View style={styles.stepCopy}>
+                        <Text style={[styles.stepTitle, { fontSize: 15 * scale, lineHeight: 21 * scale }]}>{step.title}</Text>
+                        <Text style={[styles.stepDetail, { fontSize: 12 * scale, lineHeight: 17 * scale, marginTop: 3 * scale }]} numberOfLines={2}>{step.instructions}</Text>
+                      </View>
+                      <Svg width={17 * scale} height={17 * scale} viewBox="0 0 24 24" fill="none" stroke="#FF6497" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round"><Path d="m9 18 6-6-6-6" /></Svg>
+                    </Pressable>
+                  </View>
+                );
+              }) : (
+                <View style={[styles.stateCard, { marginTop: 12 * scale }]}>
+                  <Text style={styles.stateText}>No {formatPeriod(period)} steps were included in the saved routine.</Text>
+                </View>
+              )}
+
+              {!!routine.precautions.length && (
+                <View style={[styles.precautionCard, { marginTop: 14 * scale, padding: 14 * scale }]}>
+                  <Text style={[styles.precautionTitle, { fontSize: 14 * scale }]}>Guidance and precautions</Text>
+                  {routine.precautions.map((precaution, index) => <Text key={`${index}-${precaution}`} style={[styles.precautionText, { fontSize: 12 * scale, lineHeight: 18 * scale, marginTop: 5 * scale }]}>• {precaution}</Text>)}
+                </View>
+              )}
+
+              <View style={[styles.proTip, { borderRadius: 16 * scale, padding: 15 * scale, marginTop: 14 * scale }]}>
+                <View style={[styles.tipIcon, { width: 42 * scale, height: 42 * scale, borderRadius: 13 * scale }]}><TipBulb size={27 * scale} /></View>
+                <View style={styles.tipCopy}><Text style={[styles.tipTitle, { fontSize: 15 * scale }]}>Routine tip</Text><Text style={[styles.tipText, { fontSize: 12 * scale, lineHeight: 18 * scale, marginTop: 3 * scale }]}>{tip}</Text></View>
+              </View>
+              <Pressable accessibilityRole="button" onPress={() => router.push('/progress')} style={[styles.cta, { minHeight: 54 * scale, borderRadius: 28 * scale, marginTop: 14 * scale }]}>
+                <LinearGradient colors={['#FF6494', '#FF6794', '#FF6B99']} style={styles.ctaFill}>
+                  <Text style={[styles.ctaText, { fontSize: 16 * scale }]}>Track My Progress</Text>
+                  <Svg width={21 * scale} height={21 * scale} viewBox="0 0 24 24" fill="none" stroke="#08090D" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><Path d="M4 12h15m-6-6 6 6-6 6" /></Svg>
+                </LinearGradient>
+              </Pressable>
+            </>
+          )}
+        </View>
+      </ScrollView>
+
+      <Modal visible={Boolean(selectedStep)} transparent animationType="fade" onRequestClose={() => setSelectedStep(null)}>
+        <View style={styles.modalBackdrop}>
+          <ScrollView accessibilityViewIsModal style={styles.modalCard} contentContainerStyle={styles.modalContent} showsVerticalScrollIndicator={false}>
+            <Text accessibilityRole="header" style={styles.modalTitle}>
+              {selectedStep ? `Step ${selectedStep.order} · ${selectedStep.title}` : ''}
+            </Text>
+            <Detail label="Routine period" value={`${period} routine · application order ${selectedStep?.order ?? ''}`} />
+            <Detail label="Category" value={selectedStep?.category ?? ''} />
+            <Detail label="Ingredients" value={selectedStep?.ingredients.length ? selectedStep.ingredients.join(', ') : 'No ingredient is named in the saved guidance.'} />
+            <Detail label="Frequency" value={selectedStep?.frequency ?? ''} />
+            <Detail label="Instructions" value={selectedStep?.instructions ?? ''} />
+            <Text style={styles.modalCaution}>
+              {routine?.precautions[0] ?? 'Follow the product label, patch test new products, and stop use if irritation occurs.'}
+            </Text>
+            <Pressable accessibilityRole="button" onPress={() => setSelectedStep(null)} style={styles.dismissButton}><Text style={styles.dismissText}>Done</Text></Pressable>
+          </ScrollView>
+        </View>
+      </Modal>
     </View>
-  </ScrollView></View>;
+  );
 }
 
-function ProductPack({ type, size }: { type: string; size: number }) {
-  return <View style={[styles.pack, { width: size, height: size, borderRadius: 11 }]}><Svg width={size * 0.63} height={size * 0.86} viewBox="0 0 70 96">
-    <Rect x="2" y="2" width="66" height="92" rx="10" fill="#FDFDFE" />
-    {type === 'pump' && <><Rect x="29" y="9" width="12" height="8" rx="2" fill="#E6E9E9" /><Rect x="33" y="4" width="4" height="7" fill="#CDD2D2" /><Path d="M35 4h14" stroke="#CCD1D2" strokeWidth="3" strokeLinecap="round" /><Rect x="19" y="18" width="32" height="66" rx="8" fill="#F7F8F8" stroke="#DDE2E1" /><Rect x="21" y="43" width="28" height="23" rx="2" fill="#FFF" stroke="#D8DFDD" /><Path d="M22 47h13" stroke="#38B79B" strokeWidth="3" /><Path d="M22 54h22M22 59h17" stroke="#AEB7B5" strokeWidth="1.5" /></>}
-    {type === 'toner' && <><Path d="M28 11h14v10H28z" fill="#121313" /><Path d="M32 5h7v7h-7z" fill="#0C0D0D" /><Rect x="23" y="20" width="24" height="67" rx="7" fill="#6D361B" /><Rect x="25" y="44" width="20" height="27" rx="2" fill="#F9F7F2" /><Path d="M28 50h14M28 54h12M28 58h9" stroke="#6E6B67" strokeWidth="1.4" /></>}
-    {type === 'dropper' && <><Rect x="30" y="7" width="10" height="11" rx="3" fill="#141414" /><Path d="M33 18h4l2 9h-8z" fill="#171717" /><Rect x="20" y="26" width="30" height="59" rx="7" fill="#CC791B" /><Rect x="23" y="46" width="24" height="22" rx="2" fill="#FCFBF7" /><Path d="M26 51h18" stroke="#ECA33D" strokeWidth="2.4" /><Path d="M26 56h14M26 60h16" stroke="#B9B2A7" strokeWidth="1.4" /></>}
-    {type === 'jar' && <><Path d="M18 28h34v8H18z" fill="#EEF0F0" stroke="#DDE1E0" /><Rect x="20" y="36" width="30" height="47" rx="8" fill="#FDFDFD" stroke="#E2E5E5" /><Rect x="24" y="50" width="22" height="18" rx="2" fill="#FFF" /><Path d="M26 54h10" stroke="#35B89B" strokeWidth="2.5" /><Path d="M26 59h14M26 63h12" stroke="#B5BCBB" strokeWidth="1.3" /></>}
-    {type === 'tube' && <><Path d="m22 16 26 0 5 57H17z" fill="#FFFCF8" stroke="#E2E3E4" /><Rect x="26" y="10" width="18" height="7" rx="2" fill="#F1F1EF" /><Rect x="25" y="42" width="20" height="20" rx="2" fill="#FFF" /><Path d="M26 45h8" stroke="#F28B25" strokeWidth="4" /><Path d="M27 52h15M27 56h13" stroke="#B6B7B9" strokeWidth="1.4" /><Rect x="27" y="72" width="16" height="10" rx="3" fill="#EFEFEF" /></>}
-  </Svg></View>;
+function Detail({ label, value }: { label: string; value: string }) {
+  return <View style={styles.detailBlock}><Text style={styles.detailLabel}>{label}</Text><Text style={styles.detailValue}>{value}</Text></View>;
 }
-function SunIcon({ size, color }: { size: number; color: string }) { return <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2.4} strokeLinecap="round"><Circle cx="12" cy="12" r="4" fill={color} />{Array.from({ length: 8 }, (_, i) => <Path key={i} d="M12 1.5v2.6" transform={`rotate(${i * 45} 12 12)`} />)}</Svg>; }
-function MoonIcon({ size, color }: { size: number; color: string }) { return <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}><Path d="M20.5 15.5A8.8 8.8 0 0 1 8.5 3.5 9.5 9.5 0 1 0 20.5 15.5Z" /></Svg>; }
-function TipBulb({ size }: { size: number }) { return <Svg width={size} height={size} viewBox="0 0 40 40" fill="none" stroke="#FF75A2" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><Path d="M13 25c0-4-5-6-5-12a12 12 0 0 1 24 0c0 6-5 8-5 12M14 29h12m-9 4h6m-3-22v12" /></Svg>; }
+
+function SunIcon({ size, color }: { size: number; color: string }) {
+  return <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2.4} strokeLinecap="round"><Circle cx="12" cy="12" r="4" fill={color} />{Array.from({ length: 8 }, (_, i) => <Path key={i} d="M12 1.5v2.6" transform={`rotate(${i * 45} 12 12)`} />)}</Svg>;
+}
+
+function MoonIcon({ size, color }: { size: number; color: string }) {
+  return <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}><Path d="M20.5 15.5A8.8 8.8 0 0 1 8.5 3.5 9.5 9.5 0 1 0 20.5 15.5Z" /></Svg>;
+}
+
+function TipBulb({ size }: { size: number }) {
+  return <Svg width={size} height={size} viewBox="0 0 40 40" fill="none" stroke="#FF75A2" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><Path d="M13 25c0-4-5-6-5-12a12 12 0 0 1 24 0c0 6-5 8-5 12M14 29h12m-9 4h6m-3-22v12" /></Svg>;
+}
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#050509' }, scroll: { flexGrow: 1, alignItems: 'center' }, page: { flexGrow: 1, overflow: 'hidden', backgroundColor: '#050509' }, headingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, back: { justifyContent: 'center' }, title: { color: '#F7F6F9', fontFamily: 'InterExtraBold', letterSpacing: -0.8 }, pink: { color: '#FF5A91' }, demoNotice: { alignSelf: 'center', color: '#97909B', fontFamily: 'InterMedium', textAlign: 'center', letterSpacing: 0.55 }, syncStatus: { alignSelf: 'center', color: '#D7A7B9', fontFamily: 'InterRegular', textAlign: 'center' },
-  week: { flexDirection: 'row', justifyContent: 'space-between' }, day: { flex: 1, alignItems: 'center', gap: 6 }, dayLabel: { fontFamily: 'InterMedium' }, dayCircle: { alignItems: 'center', justifyContent: 'center' },
-  tabs: { flexDirection: 'row', overflow: 'hidden', backgroundColor: 'rgba(12,13,18,0.97)', borderWidth: 1, borderColor: '#383640' }, tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11 }, activeTab: { backgroundColor: '#FF6094' }, tabText: { fontFamily: 'InterSemibold' },
-  steps: { width: '100%' }, stepRow: { width: '100%', flexDirection: 'row', alignItems: 'stretch' }, pack: { overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FDFDFE' }, productCard: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(10,12,17,0.94)', borderWidth: 1, borderColor: '#292C34' }, number: { flexShrink: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(85,28,49,0.85)', borderWidth: 0.9, borderColor: '#BD3A68' }, numberText: { color: '#FFF', fontFamily: 'InterExtraBold' }, stepCopy: { flex: 1, minWidth: 0 }, stepTitle: { color: '#F7F6F9', fontFamily: 'InterSemibold' }, stepDetail: { color: '#C2C8D2', fontFamily: 'InterRegular' }, doneDot: { position: 'absolute', top: 3, right: 3, width: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FF6294' },
-  proTip: { width: '100%', flexDirection: 'row', alignItems: 'center', borderWidth: 1.2, borderColor: '#FF4788', backgroundColor: 'rgba(34,10,24,0.86)', boxShadow: '0px 0px 16px rgba(255,58,126,0.3)' }, tipIcon: { flexShrink: 0, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#DD3D75', backgroundColor: 'rgba(75,22,44,0.9)' }, tipCopy: { flex: 1 }, tipTitle: { color: '#FF5D94', fontFamily: 'InterSemibold' }, tipText: { color: '#C4CAD5', fontFamily: 'InterRegular' },
-  cta: { width: '100%', overflow: 'hidden', boxShadow: '0px 0px 24px 2px rgba(255,68,128,0.4)' }, ctaFill: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9 }, ctaText: { color: '#08090D', fontFamily: 'InterExtraBold' },
+  screen: { flex: 1, backgroundColor: '#050509' },
+  scroll: { flexGrow: 1, alignItems: 'center' },
+  page: { flexGrow: 1, overflow: 'hidden', backgroundColor: '#050509' },
+  headingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  back: { justifyContent: 'center', alignItems: 'center' },
+  title: { color: '#F7F6F9', fontFamily: 'InterExtraBold', letterSpacing: -0.8 },
+  pink: { color: '#FF5A91' },
+  demoNotice: { alignSelf: 'center', color: '#FF9CBC', fontFamily: 'InterSemibold', textAlign: 'center', letterSpacing: 0.55 },
+  syncStatus: { alignSelf: 'center', color: '#D7A7B9', fontFamily: 'InterRegular', textAlign: 'center' },
+  safetyNotice: { color: '#FFD3DF', fontFamily: 'InterMedium', textAlign: 'center' },
+  week: { flexDirection: 'row', justifyContent: 'space-between' },
+  day: { flex: 1, alignItems: 'center', gap: 6 },
+  dayLabel: { fontFamily: 'InterMedium' },
+  dayCircle: { alignItems: 'center', justifyContent: 'center', borderWidth: 1.2 },
+  tabs: { flexDirection: 'row', overflow: 'hidden', backgroundColor: 'rgba(12,13,18,0.97)', borderWidth: 1, borderColor: '#383640' },
+  tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 12 },
+  activeTab: { backgroundColor: '#FF6094' },
+  tabText: { fontFamily: 'InterSemibold' },
+  orderNote: { color: '#BDB6C2', fontFamily: 'InterRegular' },
+  stepRow: { width: '100%', flexDirection: 'row', alignItems: 'stretch', gap: 8 },
+  stepCheck: { width: 38, minHeight: 62, borderRadius: 12, borderWidth: 1.5, borderColor: '#68505D', alignItems: 'center', justifyContent: 'center' },
+  stepCheckDone: { backgroundColor: '#FF6294', borderColor: '#FF6294' },
+  stepCard: { flex: 1, flexDirection: 'row', alignItems: 'center', minHeight: 72, backgroundColor: 'rgba(10,12,17,0.94)', borderWidth: 1, borderColor: '#292C34', borderRadius: 15, paddingHorizontal: 12, paddingVertical: 10, gap: 10 },
+  number: { flexShrink: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(85,28,49,0.85)', borderWidth: 0.9, borderColor: '#BD3A68' },
+  numberText: { color: '#FFF', fontFamily: 'InterExtraBold' },
+  stepCopy: { flex: 1, minWidth: 0 },
+  stepTitle: { color: '#F7F6F9', fontFamily: 'InterSemibold' },
+  stepDetail: { color: '#C2C8D2', fontFamily: 'InterRegular' },
+  stateCard: { width: '100%', alignItems: 'center', padding: 22, gap: 12, marginTop: 22, borderRadius: 18, borderWidth: 1, borderColor: '#45323E', backgroundColor: 'rgba(15,12,18,0.96)' },
+  stateTitle: { color: '#FFF', fontFamily: 'InterExtraBold', fontSize: 18, textAlign: 'center' },
+  stateText: { color: '#D0C8D2', fontFamily: 'InterRegular', fontSize: 14, lineHeight: 21, textAlign: 'center' },
+  primaryAction: { minHeight: 50, width: '100%', alignItems: 'center', justifyContent: 'center', borderRadius: 25, paddingHorizontal: 16, backgroundColor: '#FF6898' },
+  primaryActionText: { color: '#10080D', fontFamily: 'InterExtraBold', fontSize: 15, textAlign: 'center' },
+  secondaryAction: { minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
+  secondaryActionText: { color: '#FF9CBC', fontFamily: 'InterSemibold', fontSize: 14, textAlign: 'center' },
+  precautionCard: { width: '100%', borderWidth: 1, borderColor: '#58414E', borderRadius: 14, backgroundColor: 'rgba(24,15,21,0.92)' },
+  precautionTitle: { color: '#FF9CBC', fontFamily: 'InterSemibold' },
+  precautionText: { color: '#D4CCD5', fontFamily: 'InterRegular' },
+  proTip: { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 13, borderWidth: 1.2, borderColor: '#FF4788', backgroundColor: 'rgba(34,10,24,0.86)' },
+  tipIcon: { flexShrink: 0, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#DD3D75', backgroundColor: 'rgba(75,22,44,0.9)' },
+  tipCopy: { flex: 1 },
+  tipTitle: { color: '#FF5D94', fontFamily: 'InterSemibold' },
+  tipText: { color: '#C4CAD5', fontFamily: 'InterRegular' },
+  cta: { width: '100%', overflow: 'hidden', boxShadow: '0px 0px 24px 2px rgba(255,68,128,0.4)' },
+  ctaFill: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9 },
+  ctaText: { color: '#08090D', fontFamily: 'InterExtraBold' },
+  modalBackdrop: { flex: 1, justifyContent: 'center', padding: 20, backgroundColor: 'rgba(0,0,0,0.82)' },
+  modalCard: { width: '100%', maxWidth: 440, maxHeight: '90%', alignSelf: 'center', borderRadius: 22, borderWidth: 1, borderColor: '#704052', backgroundColor: '#171118' },
+  modalContent: { padding: 20 },
+  modalTitle: { color: '#FFF', fontFamily: 'InterExtraBold', fontSize: 19, lineHeight: 27, marginBottom: 8 },
+  detailBlock: { marginTop: 8 },
+  detailLabel: { color: '#FF9CBC', fontFamily: 'InterSemibold', fontSize: 13 },
+  detailValue: { color: '#E2DCE4', fontFamily: 'InterRegular', fontSize: 14, lineHeight: 20, marginTop: 2 },
+  modalCaution: { color: '#D0BFC8', fontFamily: 'InterRegular', fontSize: 12, lineHeight: 18, marginTop: 14 },
+  dismissButton: { alignItems: 'center', paddingVertical: 14, marginTop: 6 },
+  dismissText: { color: '#FF92B4', fontFamily: 'InterExtraBold', fontSize: 15 },
 });

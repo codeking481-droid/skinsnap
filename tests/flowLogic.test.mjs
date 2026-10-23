@@ -31,10 +31,10 @@ test('photo selection accepts readable images of any dimensions and bounds only 
 
 test('routine state ignores malformed and unknown persisted values', () => {
   assert.deepEqual(sanitizeRoutineProgress({
-    checkedSteps: ['Morning-Cleanser', 'fake-step', 7, 'Morning-Cleanser'],
+    checkedSteps: ['Morning-Cleanser', 'Morning-8', 'Evening-2', 'Morning-9', 'fake-step', 7, 'Morning-Cleanser'],
     completedDays: ['2026-02-28', '2026-02-30', 'bad-date', '2026-02-28'],
   }), {
-    checkedSteps: ['Morning-Cleanser'],
+    checkedSteps: ['Morning-Cleanser', 'Morning-8', 'Evening-2'],
     completedDays: ['2026-02-28'],
   });
   assert.deepEqual(sanitizeRoutineProgress(null), { checkedSteps: [], completedDays: [] });

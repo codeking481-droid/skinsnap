@@ -196,12 +196,12 @@ export default function OnboardingScreen() {
               <LinearGradient pointerEvents="none" colors={['rgba(5,5,8,0.12)', 'rgba(5,5,8,0.04)', 'rgba(5,5,8,0.52)']} style={[styles.privacyPortraitShade, { right: -22 * scale, top: 12 * scale, width: 250 * scale, height: 470 * scale }]} />
               <View style={{ minHeight: 120 * scale, justifyContent: 'center' }}>
                 <Text style={[styles.heading, { fontSize: 38 * scale, lineHeight: 38 * scale, letterSpacing: -1.2 * scale }]}>Your privacy{'\n'}comes <Text style={styles.accent}>first.</Text></Text>
-                <Text style={[styles.subtitle, { fontSize: 16 * scale, lineHeight: 21 * scale, marginTop: 8 * scale }]}>Your photos are secure{'\n'}and never shared.</Text>
+                <Text style={[styles.subtitle, { fontSize: 16 * scale, lineHeight: 21 * scale, marginTop: 8 * scale }]}>Your photo stays local until{'\n'}you choose an analysis.</Text>
               </View>
               <View style={[styles.privacyCards, { gap: 9 * scale }]}>
-                <PrivacyCard icon="lock" title="Your photos are secure" detail="Your photo stays on this device during the demo." scale={scale} />
-                <PrivacyCard icon="trash" title="Delete anytime" detail="Your selected photo is kept in memory for this session only." scale={scale} />
-                <PrivacyCard icon="shield" title="Used only for analysis" detail="The demo does not upload or share your photo." scale={scale} />
+                <PrivacyCard icon="lock" title="Your choice comes first" detail="The preview keeps your selected photo on this device." scale={scale} />
+                <PrivacyCard icon="trash" title="Photo handling" detail="A prepared copy is removed after processing when cleanup succeeds. Provider retention follows provider terms." scale={scale} />
+                <PrivacyCard icon="shield" title="Clear processing choices" detail="Gemini receives the photo. Groq receives text observations only. Analysis results may be saved to your account." scale={scale} />
               </View>
             </View>
           )}
@@ -237,7 +237,14 @@ export default function OnboardingScreen() {
           <View accessibilityViewIsModal style={styles.modalCard}>
             <Text style={styles.modalEyebrow}>SKINSNAP</Text>
             <Text style={styles.modalTitle}>{legalInfo}</Text>
-            <Text style={styles.modalCopy}>This prototype does not upload your photo. The final {legalInfo ?? 'policy'} details will be added before this feature is available.</Text>
+            <Text style={styles.modalCopy}>{legalInfo === 'Privacy Policy'
+              ? 'SkinSnap sends a consented photo to its secure service and Google Gemini for cosmetic observations. Groq receives text observations only. Structured results may be saved to your account. Provider retention depends on the configured service and its terms.'
+              : 'Terms of Service are not configured yet. Subscription purchases remain disabled until the required legal URL is published.'}</Text>
+            {legalInfo === 'Privacy Policy' && (
+              <Pressable accessibilityRole="link" onPress={() => { setLegalInfo(null); router.push('/privacy'); }}>
+                <Text style={styles.legalLink}>Read privacy information</Text>
+              </Pressable>
+            )}
             <Pressable accessibilityRole="button" onPress={() => setLegalInfo(null)} style={styles.modalButton}><Text style={styles.modalButtonText}>Close</Text></Pressable>
           </View>
         </View>

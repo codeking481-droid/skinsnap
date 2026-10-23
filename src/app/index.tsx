@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, RadialGradient, Stop, Ellipse, Path } from 'react-native-svg';
@@ -97,7 +97,7 @@ export default function WelcomeScreen() {
               </Pressable>
             )}
             <View style={[styles.community, { marginTop: 9 * scale, minHeight: 22 * scale, gap: 9 * scale }]}>
-              <View style={styles.avatars} accessibilityElementsHidden>
+              <View style={styles.avatars} {...Platform.select({ web: { 'aria-hidden': true as const }, default: { accessibilityElementsHidden: true } })}>
                 {avatars.map((source, item) => <Image key={item} source={source} style={{ width: 22 * scale, height: 22 * scale, borderRadius: 11 * scale, borderColor: '#F6E8EF', borderWidth: 0.8, marginLeft: item ? -6 * scale : 0 }} />)}
               </View>
               <Text style={[styles.communityText, { fontSize: 10 * scale }]}>A fresh start for your skincare routine</Text>

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   BackHandler,
   Image,
   Linking,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -35,11 +36,16 @@ import {
   getActiveDownsellClaim,
 } from '../services/offerEligibility';
 import { verifyAuthenticatedSession } from '../services/session';
+import {
+  getPaywallPrice,
+  SUBSCRIPTION_PURCHASES_ENABLED,
+  usesDevelopmentPricePreview,
+} from '../paywallPresentation';
 
 const PLAN_DETAILS: Record<SubscriptionPlan, { name: string; period: string; badge?: string }> = {
-  weekly: { name: 'Weekly', period: 'week' },
-  yearly: { name: 'Yearly', period: 'year', badge: 'BEST VALUE' },
-  yearlyDownsell: { name: 'Exclusive yearly', period: 'year', badge: 'ONE-TIME OFFER' },
+  weekly: { name: 'Weekly plan', period: 'week' },
+  yearly: { name: 'Yearly plan', period: 'year', badge: 'BEST VALUE' },
+  yearlyDownsell: { name: 'Eligible yearly offer', period: 'year', badge: 'ONE-TIME OFFER' },
 };
 
 const BENEFITS = [
@@ -48,7 +54,7 @@ const BENEFITS = [
   'Progress history and follow-up tracking',
 ];
 
-const developmentTestMode = process.env.EXPO_PUBLIC_AI_DEV_TEST_MODE === 'true';
+const developmentTestMode = __DEV__ && process.env.EXPO_PUBLIC_AI_DEV_TEST_MODE === 'true';
 
 function hasSecureBackend(): boolean {
   return Boolean(process.env.EXPO_PUBLIC_API_URL?.trim().startsWith('https://'));
@@ -110,19 +116,20 @@ export default function PaywallScreen() {
   const selectedPackage = packages[selected];
   const standardAnnual = packages.yearly;
   const annualDownsell = packages.yearlyDownsell;
-  const savingsPercent = useMemo(() => {
-    if (!standardAnnual || !annualDownsell) return null;
-    return calculateSavingsPercent(
+  const savingsPercent = standardAnnual && annualDownsell
+    ? calculateSavingsPercent(
       standardAnnual.product.price,
       annualDownsell.product.price,
       standardAnnual.product.currencyCode,
       annualDownsell.product.currencyCode,
-    );
-  }, [annualDownsell, standardAnnual]);
+    )
+    : null;
   const storeReady = billingState?.kind === 'ready';
+  const developmentPreview = usesDevelopmentPricePreview(__DEV__, billingState?.kind, Platform.OS);
   const legalConfigured = [process.env.EXPO_PUBLIC_TERMS_URL, process.env.EXPO_PUBLIC_PRIVACY_URL]
     .every((url) => Boolean(url && url.startsWith('https://')));
-  const canPurchase = storeReady
+  const canPurchase = SUBSCRIPTION_PURCHASES_ENABLED
+    && storeReady
     && Boolean(selectedPackage)
     && hasSession
     && legalConfigured
@@ -146,6 +153,12 @@ export default function PaywallScreen() {
       } finally {
         setBusy(false);
       }
+      return;
+    }
+
+    // Previewing a disabled paywall must not consume an account's one-time claim.
+    if (!SUBSCRIPTION_PURCHASES_ENABLED) {
+      continueFree();
       return;
     }
 
@@ -189,7 +202,7 @@ export default function PaywallScreen() {
   }, [closePaywall]));
 
   const buySelectedPlan = async () => {
-    if (busy || !canPurchase) return;
+    if (!SUBSCRIPTION_PURCHASES_ENABLED || busy || !canPurchase) return;
     setBusy(true);
     const result = await purchasePlan(selected, selectedPackage);
     if (result.kind === 'active') {
@@ -229,7 +242,11 @@ export default function PaywallScreen() {
 
   const openLegal = async (kind: 'terms' | 'privacy') => {
     const url = kind === 'terms' ? process.env.EXPO_PUBLIC_TERMS_URL : process.env.EXPO_PUBLIC_PRIVACY_URL;
-    if (!url) {
+    if (!url?.startsWith('https://')) {
+      if (kind === 'privacy') {
+        router.push('/privacy');
+        return;
+      }
       setNotice(`${kind === 'terms' ? 'Terms of Service' : 'Privacy Policy'} URL is not configured. Purchases must remain disabled until the required legal URL is published.`);
       return;
     }
@@ -241,18 +258,15 @@ export default function PaywallScreen() {
   };
 
   const activePhotoUri = photoUri && !photoUnavailable ? photoUri : null;
-  const showStorePrice = (plan: SubscriptionPlan, product: PurchasesPackage | undefined) => {
-    if (!product) return storeReady ? 'Plan unavailable' : 'Price loads in Android test build';
-    const period = plan === 'weekly' ? 'week' : 'year';
-    return `${product.product.priceString} / ${period}`;
-  };
+  const showStorePrice = (plan: SubscriptionPlan, product: PurchasesPackage | undefined) =>
+    getPaywallPrice(plan, product?.product.priceString, developmentPreview).label;
 
   if (downsell && !downsellReady) return <View style={styles.screen} />;
 
   return (
     <View style={styles.screen}>
       <ScrollView contentContainerStyle={[styles.scroll, { minHeight: height }]} showsVerticalScrollIndicator={false}>
-        <View style={[styles.page, { width: Math.min(width, 520), paddingHorizontal: 22 * scale, paddingTop: Math.max(insets.top, 12 * scale), paddingBottom: Math.max(insets.bottom, 20 * scale) }]}>
+        <View style={[styles.page, { width: Math.min(width, 520), paddingHorizontal: 22 * scale, paddingTop: Math.max(insets.top, 12 * scale), paddingBottom: Math.max(insets.bottom, 20 * scale) + 16 }]}>
           <Image source={require('../../assets/images/welcome-portrait.png')} style={StyleSheet.absoluteFill} resizeMode="cover" accessible={false} />
           <LinearGradient colors={['rgba(3,3,7,0.35)', 'rgba(3,3,7,0.79)', 'rgba(3,3,7,0.98)', '#040408']} locations={[0, 0.31, 0.65, 1]} style={StyleSheet.absoluteFill} pointerEvents="none" />
           <View style={[styles.topActions, { marginBottom: 7 * scale }]}>
@@ -281,7 +295,7 @@ export default function PaywallScreen() {
             {downsell ? <>A personal insight{'\n'}plan, just for you</> : <>Unlock Your Personal{'\n'}Skin Insights</>}
           </Text>
           <Text style={[styles.subheading, { fontSize: 12.5 * scale, lineHeight: 18 * scale, marginTop: 7 * scale }]}>
-            Full, non-diagnostic skin observations, a personalised routine and progress tracking. Your photo is only sent after purchase, consent and a request.
+            Full, non-diagnostic skin observations, a personalised routine and progress tracking. Your photo is sent only after the required access check, your consent and your analysis request.
           </Text>
 
           <View style={[styles.benefits, { marginTop: 12 * scale, gap: 7 * scale }]}>
@@ -309,7 +323,9 @@ export default function PaywallScreen() {
                   <View style={[styles.radio, { width: 23 * scale, height: 23 * scale, borderRadius: 12 * scale, borderWidth: 1.7 * scale, borderColor: chosen ? '#FF6A99' : '#8C7B86' }]}>{chosen && <View style={[styles.radioDot, { width: 13 * scale, height: 13 * scale, borderRadius: 7 * scale }]} />}</View>
                   <View style={styles.planCopy}>
                     <Text style={[styles.planName, { fontSize: 14.5 * scale }]}>{detail.name}</Text>
-                    <Text style={[styles.planTerms, { fontSize: 10 * scale, marginTop: 3 * scale }]}>{showStorePrice(plan, product)} · auto-renews</Text>
+                    <Text style={[styles.planTerms, { fontSize: 10 * scale, lineHeight: 15 * scale, marginTop: 3 * scale }]}>
+                      {developmentPreview ? `DEVELOPMENT PREVIEW · ${showStorePrice(plan, product)}` : `${showStorePrice(plan, product)} · auto-renews`}
+                    </Text>
                     {downsell && plan === 'yearlyDownsell' && savingsPercent !== null && standardAnnual && <Text style={[styles.savings, { fontSize: 10 * scale, marginTop: 3 * scale }]}>Standard {standardAnnual.product.priceString}/year · save about {savingsPercent}%</Text>}
                   </View>
                 </Pressable>
@@ -325,7 +341,9 @@ export default function PaywallScreen() {
             style={[styles.cta, { minHeight: 54 * scale, borderRadius: 29 * scale, marginTop: 13 * scale, opacity: canPurchase && !busy ? 1 : 0.55 }]}
           >
             <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.ctaFill}>
-              <Text style={[styles.ctaText, { fontSize: 15 * scale }]}>{busy ? 'Connecting securely…' : selectedPackage ? `Subscribe · ${showStorePrice(selected, selectedPackage)}` : 'Subscription not available'}</Text>
+              <Text style={[styles.ctaText, { fontSize: 15 * scale }]}>
+                {busy ? 'Connecting securely…' : developmentPreview ? 'Purchases disabled in preview' : selectedPackage ? `Subscribe · ${showStorePrice(selected, selectedPackage)}` : 'Subscription not available'}
+              </Text>
             </LinearGradient>
           </Pressable>
           <Text style={[styles.disclosure, { fontSize: 9.5 * scale, lineHeight: 14 * scale, marginTop: 6 * scale }]}>
@@ -352,10 +370,6 @@ export default function PaywallScreen() {
                       ? 'Exclusive pricing could not be verified against the standard annual product.'
                       : 'This product is not available right now.'}
           </Text>}
-          {!hasSession && <Pressable accessibilityRole="button" onPress={() => router.push('/sign-in')} style={[styles.signInButton, { minHeight: 40 * scale, borderRadius: 21 * scale, marginTop: 6 * scale }]}>
-            <Text style={[styles.signInText, { fontSize: 11 * scale }]}>Sign in or create an account</Text>
-          </Pressable>}
-
           {developmentTestMode && hasSession && !downsell && <Pressable
             accessibilityRole="button"
             accessibilityLabel="Run development-only AI analysis test without purchasing"
@@ -374,6 +388,7 @@ export default function PaywallScreen() {
 
           <View style={[styles.footer, { marginTop: 11 * scale, gap: 13 * scale }]}>
             <Pressable accessibilityRole="button" onPress={() => void restore()}><Text style={[styles.link, { fontSize: 9.5 * scale }]}>Restore Purchases</Text></Pressable>
+            {!hasSession && developmentTestMode && <Pressable accessibilityRole="link" onPress={() => router.push('/sign-in')}><Text style={[styles.link, { fontSize: 9.5 * scale }]}>Sign in for test</Text></Pressable>}
             <Pressable accessibilityRole="link" onPress={() => void openLegal('terms')}><Text style={[styles.link, { fontSize: 9.5 * scale }]}>Terms</Text></Pressable>
             <Pressable accessibilityRole="link" onPress={() => void openLegal('privacy')}><Text style={[styles.link, { fontSize: 9.5 * scale }]}>Privacy</Text></Pressable>
           </View>
@@ -441,8 +456,6 @@ const styles = StyleSheet.create({
   status: { maxWidth: 370, color: '#FFB1C7', textAlign: 'center', fontFamily: 'InterMedium' },
   freeButton: { width: '100%', maxWidth: 390, justifyContent: 'center', alignItems: 'center', borderColor: '#5A4753', borderWidth: 1, backgroundColor: 'rgba(18,15,21,0.9)' },
   freeText: { color: '#E8DCE4', fontFamily: 'InterSemibold' },
-  signInButton: { width: '100%', maxWidth: 390, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#815067', backgroundColor: 'rgba(39,22,33,0.65)' },
-  signInText: { color: '#FFD4E1', fontFamily: 'InterSemibold' },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
   link: { color: '#E5DDE6', fontFamily: 'InterMedium', textDecorationLine: 'underline' },
   footerNote: { maxWidth: 365, textAlign: 'center', color: '#B0A7B3', fontFamily: 'InterRegular' },

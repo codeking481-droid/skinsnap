@@ -4,12 +4,31 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CinematicSkinScanner } from '../components/CinematicSkinScanner';
 import { usePhoto } from '../PhotoContext';
 import { backOrReplace } from '../navigation';
 import { AnalysisRequestError, requestSkinAnalysis } from '../services/analysisApi';
 
 const requestKey = () => `analysis-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const developmentTestMode = process.env.EXPO_PUBLIC_AI_DEV_TEST_MODE === 'true';
+
+function stageLabel(stage: string | null): string {
+  switch (stage) {
+    case 'dimensions': return 'IMAGE DIMENSIONS';
+    case 'manipulation': return 'IMAGE CONVERSION';
+    case 'file-access': return 'PREPARED FILE';
+    case 'multipart': return 'UPLOAD FORM';
+    case 'upload': return 'SECURE REQUEST (UPLOAD + ANALYSIS)';
+    case 'authentication': return 'AUTHENTICATION';
+    case 'quota': return 'ANALYSIS LIMIT';
+    case 'vision': return 'GROQ PHOTO ANALYSIS';
+    case 'gemini': return 'GEMINI';
+    case 'groq': return 'GROQ';
+    case 'database': return 'DATABASE SAVE';
+    case 'response-parsing': return 'RESULT VALIDATION';
+    default: return 'ANALYSIS';
+  }
+}
 
 export default function AnalysisScreen() {
   const { width, height } = useWindowDimensions();
@@ -23,6 +42,7 @@ export default function AnalysisScreen() {
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
+  const [errorStage, setErrorStage] = useState<string | null>(null);
   const [photoUnavailable, setPhotoUnavailable] = useState(false);
   const started = useRef(false);
   const inFlight = useRef(false);
@@ -38,6 +58,7 @@ export default function AnalysisScreen() {
     setBusy(true);
     setErrorMessage(null);
     setErrorCode(null);
+    setErrorStage(null);
     try {
       if (!photoUri || photoUnavailable) {
         throw new AnalysisRequestError('photo-unavailable', 'Choose a photo again before requesting analysis.');
@@ -55,6 +76,7 @@ export default function AnalysisScreen() {
       if (!active.current) return;
       const code = error instanceof AnalysisRequestError ? error.code : 'network-error';
       setErrorCode(code);
+      setErrorStage(error instanceof AnalysisRequestError ? error.stage : 'upload');
       setErrorMessage(error instanceof Error ? error.message : 'Analysis could not be completed.');
     } finally {
       inFlight.current = false;
@@ -80,6 +102,20 @@ export default function AnalysisScreen() {
   const returnToPlans = () => router.replace('/paywall');
   const returnToUpload = () => backOrReplace('/upload');
 
+  if (busy) {
+    return (
+      <CinematicSkinScanner
+        photoUri={photoUri && !photoUnavailable ? photoUri : null}
+        developmentTestMode={developmentTestMode}
+        onBack={returnToUpload}
+        onPhotoError={() => {
+          setPhotoUnavailable(true);
+          setPhotoUri(null);
+        }}
+      />
+    );
+  }
+
   return (
     <View style={styles.screen}>
       <ScrollView contentContainerStyle={[styles.scroll, { minHeight: height }]} showsVerticalScrollIndicator={false}>
@@ -96,9 +132,17 @@ export default function AnalysisScreen() {
           <Text style={[styles.subtitle, { fontSize: 12.5 * scale, lineHeight: 18 * scale, marginTop: 7 * scale }]}>
             {busy
               ? developmentTestMode
-                ? 'Development-only test: only the server-allowlisted account can request up to two analyses per rolling 30 days. No purchase is made.'
+                ? 'Development-only test: authorized accounts are subject to server-side limits. Admin testing has a finite rolling 30-day safety cap; no purchase is made.'
                 : 'Verifying your subscription and requesting analysis from the secure service. No sample results are shown.'
-              : errorMessage}
+              : errorMessage && errorCode === 'photo-unavailable'
+                ? `Photo preparation failed · ${stageLabel(errorStage)}. No photo was uploaded and no AI request was sent. ${errorMessage}`
+                : errorMessage && ['vision', 'gemini', 'groq', 'database'].includes(errorStage ?? '')
+                  ? 'SkinSnap could not complete your analysis right now. Please try again shortly.'
+                : errorMessage && errorStage
+                  ? errorCode === 'rate-limited'
+                    ? `${stageLabel(errorStage)} · ${errorMessage}`
+                    : `Analysis failed · ${stageLabel(errorStage)}. ${errorMessage}`
+                : errorMessage}
           </Text>
 
           <View style={[styles.scanner, { width: ringSize, height: ringSize, marginTop: 27 * scale }]}>
@@ -128,7 +172,11 @@ export default function AnalysisScreen() {
             <Text style={[styles.infoText, { fontSize: 11 * scale, lineHeight: 16 * scale, marginTop: 5 * scale }]}>
               {busy
                 ? 'The app will only upload your selected image after a verified subscription, your consent and a secure backend check.'
-                  : 'Only a validated response from the secure service is displayed. If a network request was interrupted, retrying uses the same request key to avoid duplicate inference where the backend supports idempotency.'}
+                  : errorCode === 'rate-limited' || errorCode === 'admin-test-cap-reached'
+                    ? 'No AI analysis or routine generation was started for this attempt. Please wait for the account allowance to become available before starting another scan.'
+                  : errorCode === 'photo-unavailable'
+                    ? 'Image conversion and file checks happen before upload. A preparation retry does not consume the server-side AI quota; the request key stays unchanged.'
+                    : 'Your photo helps create skin insights and a routine. Results appear when your analysis is complete.'}
             </Text>
           </View>
 
@@ -137,12 +185,20 @@ export default function AnalysisScreen() {
               ? <Pressable accessibilityRole="button" onPress={returnToPlans} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
                 <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>View subscription options</Text></LinearGradient>
               </Pressable>
+              : errorCode === 'rate-limited' || errorCode === 'admin-test-cap-reached'
+                ? <Pressable accessibilityRole="button" onPress={returnToUpload} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
+                  <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>Return to photo and free tools</Text></LinearGradient>
+                </Pressable>
+              : errorCode === 'development-test-not-authorized' || errorCode === 'development-test-unavailable'
+                ? <Pressable accessibilityRole="button" onPress={retry} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
+                  <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>Retry after test access is fixed</Text></LinearGradient>
+                </Pressable>
               : errorCode === 'retry-limit'
                 ? <Pressable accessibilityRole="button" onPress={returnToUpload} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
                   <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>Start a new scan</Text></LinearGradient>
                 </Pressable>
               : <Pressable accessibilityRole="button" onPress={retry} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
-                <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>Try secure analysis again</Text></LinearGradient>
+                <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>{errorCode === 'photo-unavailable' ? 'Retry photo preparation' : errorCode === 'network-error' ? 'Retry same analysis request' : 'Retry secure analysis'}</Text></LinearGradient>
               </Pressable>}
             <Pressable accessibilityRole="button" onPress={returnToUpload} style={[styles.secondaryButton, { minHeight: 44 * scale, borderRadius: 23 * scale, marginTop: 8 * scale }]}><Text style={[styles.secondaryText, { fontSize: 12 * scale }]}>Return to photo and free tools</Text></Pressable>
           </View>}

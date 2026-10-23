@@ -1,0 +1,18 @@
+# Third-party processors and services
+
+**Reviewed:** 2026-10-22. Provider pages below were accessed on this date. Terms/settings can change; verify again before release.
+
+| Service | Data sent by SkinSnap | Purpose and evidence | Retention/settings and status |
+|---|---|---|---|
+| Cloudflare Workers | Authenticated multipart photo, request metadata, API calls and responses | API execution; `worker/src/index.ts`; `wrangler.jsonc` has Workers observability enabled | Worker source does not log photo bytes, tokens, or result text. Cloudflare Workers Logs stores invocation/custom log data in the Cloudflare account. Exact configured retention, sampling, IP fields, and log export are UNKNOWN. [Workers Logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/) |
+| Supabase Auth/Database | Auth token for verification; account ID; structured analysis, routine data, account/profile data | Auth `/auth/v1/user`; PostgREST and RPC calls in `worker/src/index.ts` | App result flow does not save raw photos. Project region, backup/log retention, DPA, and operational retention are not verified here. [Supabase privacy notice](https://supabase.com/privacy) and [user-data management](https://supabase.com/docs/guides/auth/managing-user-data) |
+| Google Gemini API | Full JPEG image bytes (inline image data), prompt and model response | `gemini-3.8-flash:generateContent` in `worker/src/index.ts` | Paid vs unpaid mode is UNKNOWN. Google's current Gemini API terms state unpaid content may be used to improve products and may be reviewed by humans; the terms say not to submit sensitive, confidential, or personal information to unpaid services. Paid services do not use prompts/responses to improve products but log them for a limited period for safety/legal purposes; exact account/project billing status and settings require owner confirmation. [Gemini API Terms](https://ai.google.dev/gemini-api/terms) |
+| Groq API | Text-only structured visual observations and a routine-generation prompt; not the photo | `openai/gpt-oss-20b` chat completions in `worker/src/index.ts` | Groq says inference data is not retained by default, but may be temporarily retained for reliability/abuse monitoring up to 30 days; ZDR is an account control and has not been checked. [Groq Your Data](https://console.groq.com/docs/your-data) |
+| RevenueCat | SDK is installed and billing code can initialize when platform API keys exist | `react-native-purchases`, `src/services/billing.ts`, Worker entitlement checks | Production billing is intentionally not enabled for this task. Actual RevenueCat keys/configuration and SDK data collection are not independently confirmed. [RevenueCat privacy](https://www.revenuecat.com/privacy/) |
+| Expo/React Native packages | Device/runtime information required for camera, image selection, secure storage, rendering, and optional billing SDK | Declared dependencies in `package.json` | No analytics/crash-reporting package is listed in the inspected manifest. Transitive SDK telemetry and Expo Go vs release behavior require final build review. |
+
+## Important provider distinction
+
+Removing the app-controlled temporary JPEG does not remove copies or transient logs held by Google, Cloudflare, Supabase, or Groq. SkinSnap has no provider-side deletion API integration in this repository.
+
+Google's Gemini API terms require paid services for API clients made available in the EEA, Switzerland, and UK. The terms also restrict the service to professional/business development and prohibit using it in clinical practice or to provide medical advice. Confirm account billing and service eligibility before consumer release.

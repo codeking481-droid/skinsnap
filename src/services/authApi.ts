@@ -1,8 +1,9 @@
 import { clearSessionToken, getSessionToken, saveAuthenticatedSession } from './session';
 import { parseAnalysisResult, type SkinAnalysisResult } from './analysisApi';
+import { deleteRoutineProgress } from '../routineStorage';
 
 export class AuthApiError extends Error {
-  constructor(message: string) {
+  constructor(message: string, readonly accountDeleted = false) {
     super(message);
     this.name = 'AuthApiError';
   }
@@ -123,6 +124,26 @@ export async function deleteAccountData(): Promise<void> {
   const { apiUrl } = config();
   const token = await getSessionToken();
   if (!token) throw new AuthApiError('Sign in before deleting your account.');
+  let accountId: string;
+  let identityResponse: Response;
+  try {
+    identityResponse = await fetch(`${apiUrl}/v1/session`, {
+      headers: { Authorization: ['Bearer ', token].join('') },
+    });
+  } catch {
+    throw new AuthApiError('Could not verify your account before deletion. Your account was not deleted; retry when online.');
+  }
+  if (!identityResponse.ok) throw new AuthApiError('Your account could not be verified before deletion. Your account was not deleted; sign in again and retry.');
+  try {
+    const identity: unknown = await identityResponse.json();
+    const id = identity && typeof identity === 'object' && !Array.isArray(identity)
+      ? (identity as Record<string, unknown>).userId
+      : null;
+    if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) throw new Error('invalid-identity');
+    accountId = id;
+  } catch {
+    throw new AuthApiError('The account service returned an invalid identity. Your account was not deleted; retry later.');
+  }
   let response: Response;
   try {
     response = await fetch(`${apiUrl}/v1/account`, {
@@ -134,9 +155,23 @@ export async function deleteAccountData(): Promise<void> {
   }
   if (!response.ok) throw new AuthApiError('Account deletion could not be confirmed. Your account was not deleted; please retry.');
   try {
+    await deleteRoutineProgress(accountId);
+  } catch {
+    let sessionClearFailed = false;
+    try {
+      await clearSessionToken();
+    } catch {
+      sessionClearFailed = true;
+    }
+    throw new AuthApiError(
+      `The server deleted your account, but this device could not remove its saved routine progress.${sessionClearFailed ? ' It also could not clear the local sign-in; remove the app data before sharing this device.' : ' Clear SkinSnap app storage before sharing this device.'}`,
+      true,
+    );
+  }
+  try {
     await clearSessionToken();
   } catch {
-    throw new AuthApiError('Your account was deleted, but this device could not clear its local sign-in. Remove the app data before sharing this device.');
+    throw new AuthApiError('Your account was deleted, but this device could not clear its local sign-in. Remove the app data before sharing this device.', true);
   }
 }
 

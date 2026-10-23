@@ -9,6 +9,8 @@ interface Env {
   GROQ_API_KEY?: string;
   AI_DEV_TEST_ENABLED?: string;
   AI_DEV_TEST_USER_ID?: string;
+  AI_ADMIN_TEST_USER_ID?: string;
+  AI_ADMIN_TEST_MONTHLY_LIMIT?: string;
   ALLOWED_ORIGINS?: string;
 }
 
@@ -37,17 +39,24 @@ type AnalysisResult = {
 class ApiError extends Error {
   readonly status: number;
   readonly code: string;
+  readonly retryAfterSeconds?: number;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, retryAfterSeconds?: number) {
     super(message);
     this.status = status;
     this.code = code;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
 const MAX_ANALYSIS_PHOTO_BYTES = 12 * 1024 * 1024;
 const MONTHLY_ANALYSIS_LIMIT = 20;
 const DEV_ANALYSIS_LIMIT = 2;
+const DEFAULT_ADMIN_TEST_LIMIT = 20;
+const MAX_ADMIN_TEST_LIMIT = 100;
+const GROQ_VISION_MODEL = 'qwen/qwen3.8-27b';
+const MAX_VISION_ATTEMPTS = 2;
+const MAX_VISION_RATE_LIMIT_WAIT_MS = 10_000;
 const ENTITLEMENT_ID = 'skinsnap_premium';
 const OBSERVATION_CATEGORIES = new Set([
   'visible-shine',
@@ -56,6 +65,64 @@ const OBSERVATION_CATEGORIES = new Set([
   'visible-blemishes',
   'general-texture',
 ]);
+const RESTRICTED_COSMETIC_LANGUAGE = /\b(diagnos(?:e|is|ed|ing)?|treat(?:ment|s|ed|ing)?|cure[ds]?|prescri(?:be|ption)|eczema|acne|rosacea|infection|skin cancer|medical[- ]grade|antibiotic|steroid|medication|beauty score|attractiveness|guaranteed results?)\b/i;
+
+function isSafeCosmeticText(value: string): boolean {
+  return !RESTRICTED_COSMETIC_LANGUAGE.test(value);
+}
+
+function safeClientRequestId(request: Request): string {
+  const requestId = new URL(request.url).searchParams.get('client_request_id') ?? '';
+  return /^[A-Za-z0-9._:-]{1,64}$/.test(requestId) ? requestId : 'unavailable';
+}
+
+function logAnalysisProgress(requestId: string, stage: string, details: Record<string, string | number> = {}): void {
+  console.info('[SkinSnap analysis]', { requestId, stage, ...details });
+}
+
+function visionFailureCategory(status: number): string {
+  if (status === 429) return 'quota-or-rate-limit';
+  if (status === 401 || status === 403) return 'key-or-permission';
+  if (status === 404) return 'model-or-endpoint-not-found';
+  if (status === 400) return 'request-rejected';
+  if ([502, 503, 504].includes(status)) return 'temporarily-unavailable';
+  return 'upstream-error';
+}
+
+function retryAfterMilliseconds(value: string | null): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1000);
+  const retryAt = Date.parse(value);
+  return Number.isFinite(retryAt) ? Math.max(0, retryAt - Date.now()) : null;
+}
+
+function visionErrorCode(category: string): string {
+  if (category === 'quota-or-rate-limit') return 'vision-provider-quota-exhausted';
+  if (category === 'key-or-permission') return 'vision-provider-permission-denied';
+  if (category === 'model-or-endpoint-not-found') return 'vision-provider-model-unavailable';
+  if (category === 'request-rejected') return 'vision-provider-request-rejected';
+  if (category === 'temporarily-unavailable') return 'vision-provider-overloaded';
+  return 'vision-provider-unavailable';
+}
+
+function logVisionFailure(details: {
+  requestId: string;
+  httpStatus: number | null;
+  category: string;
+  timedOut: boolean;
+  attempt: number;
+}): void {
+  console.warn('[SkinSnap upstream]', {
+    provider: 'groq-vision',
+    model: GROQ_VISION_MODEL,
+    requestId: details.requestId,
+    httpStatus: details.httpStatus,
+    category: details.category,
+    timedOut: details.timedOut,
+    attempt: details.attempt,
+  });
+}
 
 function json(body: unknown, status = 200, headers?: HeadersInit): Response {
   const responseHeaders = new Headers(headers);
@@ -200,16 +267,17 @@ function parseModelResult(text: string): SkinObservations {
   try {
     value = JSON.parse(text);
   } catch {
-    throw new ApiError(502, 'analysis-invalid-response', 'The analysis provider returned an unreadable response.');
+    throw new ApiError(502, 'vision-invalid-response', 'The vision provider returned an unreadable response.');
   }
   if (!isRecord(value)
     || typeof value.summary !== 'string'
     || value.summary.trim().length === 0
+    || !isSafeCosmeticText(value.summary)
     || value.summary.length > 800
     || !['clear', 'limited'].includes(String(value.imageQuality))
     || !Array.isArray(value.observations)
     || value.observations.length > 12) {
-    throw new ApiError(502, 'analysis-invalid-response', 'The analysis provider returned an unsupported response.');
+    throw new ApiError(502, 'vision-invalid-response', 'The vision provider returned an unsupported response.');
   }
   const observations: SkinObservation[] = value.observations.map((item) => {
     if (!isRecord(item)
@@ -217,9 +285,10 @@ function parseModelResult(text: string): SkinObservations {
       || !OBSERVATION_CATEGORIES.has(item.category)
       || typeof item.observation !== 'string'
       || !item.observation.trim()
+      || !isSafeCosmeticText(item.observation)
       || item.observation.length > 400
       || !['low', 'moderate', 'high'].includes(String(item.confidence))) {
-      throw new ApiError(502, 'analysis-invalid-response', 'The analysis provider returned an unsupported observation.');
+      throw new ApiError(502, 'vision-invalid-response', 'The vision provider returned an unsupported observation.');
     }
     return {
       category: item.category as SkinObservation['category'],
@@ -230,41 +299,84 @@ function parseModelResult(text: string): SkinObservations {
   return { imageQuality: value.imageQuality as SkinObservations['imageQuality'], summary: value.summary, observations };
 }
 
-async function analyzeWithGemini(env: Env, file: File): Promise<SkinObservations> {
-  const apiKey = required(env.GEMINI_API_KEY, 'Gemini');
+async function analyzeWithGroqVision(env: Env, file: File, requestId: string): Promise<SkinObservations> {
+  const apiKey = required(env.GROQ_API_KEY, 'Groq');
   const content = new Uint8Array(await file.arrayBuffer());
-  let response: Response;
-  try {
-    response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: 'Provide cautious, non-diagnostic observations of visible skin features only. Do not identify the person or infer age, ethnicity, gender, health conditions, or any protected or sensitive trait. Do not diagnose or recommend medical treatment. Lighting, filters, and camera quality can affect observations. Return JSON with imageQuality (clear or limited), summary (string), and observations (array of {category, observation, confidence}). Categories may only be visible-shine, apparent-dryness, uneven-looking-tone, visible-blemishes, general-texture. Confidence must be low, moderate, or high. If the face or skin is not clearly visible, set imageQuality to limited, say why in the summary, and return no observations.' },
-            { inline_data: { mime_type: file.type, data: base64(content) } },
-          ],
-        }],
-        generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
-      }),
-      signal: AbortSignal.timeout(35_000),
+  let response: Response | null = null;
+  for (let attempt = 1; attempt <= MAX_VISION_ATTEMPTS; attempt += 1) {
+    logAnalysisProgress(requestId, 'vision-started', { provider: 'groq', model: GROQ_VISION_MODEL, attempt });
+    try {
+      response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: GROQ_VISION_MODEL,
+          reasoning_effort: 'none',
+          temperature: 0.2,
+          max_completion_tokens: 1800,
+          messages: [{
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: 'Provide cautious, non-diagnostic observations of visible skin features only. Do not identify the person or infer age, ethnicity, gender, health conditions, or any protected or sensitive trait. Do not diagnose or recommend medical treatment. Lighting, filters, and camera quality can affect observations. Return one JSON object with imageQuality (clear or limited), summary (string), and observations (array of {category, observation, confidence}). Categories may only be visible-shine, apparent-dryness, uneven-looking-tone, visible-blemishes, general-texture. Confidence must be low, moderate, or high. If the face or skin is not clearly visible, set imageQuality to limited, explain why in the summary, and return no observations.',
+              },
+              {
+                type: 'image_url',
+                image_url: { url: `data:${file.type};base64,${base64(content)}` },
+              },
+            ],
+          }],
+          response_format: { type: 'json_object' },
+        }),
+        signal: AbortSignal.timeout(35_000),
+      });
+    } catch (error) {
+      const timedOut = error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
+      logVisionFailure({
+        requestId,
+        httpStatus: null,
+        category: timedOut ? 'timeout' : 'network-error',
+        timedOut,
+        attempt,
+      });
+      throw new ApiError(503, 'vision-provider-unavailable', 'SkinSnap could not complete your analysis right now. Please try again shortly.');
+    }
+
+    if (response.ok) break;
+    const category = visionFailureCategory(response.status);
+    const retryAfter = retryAfterMilliseconds(response.headers.get('Retry-After'));
+    const retryAfterIsBounded = retryAfter === null || retryAfter <= 2_000;
+    const shortRateLimit = response.status === 429 && retryAfter !== null
+      && retryAfter <= MAX_VISION_RATE_LIMIT_WAIT_MS;
+    const isRetryable = ([502, 503, 504].includes(response.status) && retryAfterIsBounded) || shortRateLimit;
+    logVisionFailure({
+      requestId,
+      httpStatus: response.status,
+      category,
+      timedOut: false,
+      attempt,
     });
-  } catch {
-    throw new ApiError(503, 'analysis-provider-unavailable', 'The analysis provider could not be reached. Please retry.');
+    if (!isRetryable || attempt === MAX_VISION_ATTEMPTS) {
+      throw new ApiError(503, visionErrorCode(category), 'SkinSnap could not complete your analysis right now. Please try again shortly.',
+        response.status === 429 && retryAfter !== null ? Math.ceil(retryAfter / 1000) : undefined);
+    }
+    const exponentialDelay = Math.min(2_000, 250 * (2 ** (attempt - 1)) + Math.floor(Math.random() * 251));
+    const delay = retryAfter ?? exponentialDelay;
+    await new Promise((resolve) => setTimeout(resolve, delay));
   }
-  if (!response.ok) {
-    throw new ApiError(503, 'analysis-provider-unavailable', 'The analysis provider is temporarily unavailable. Please retry.');
+  if (!response?.ok) {
+    throw new ApiError(503, 'vision-provider-unavailable', 'SkinSnap could not complete your analysis right now. Please try again shortly.');
   }
   const payload = await readJson(response);
-  const candidates = isRecord(payload) && Array.isArray(payload.candidates) ? payload.candidates : [];
-  const firstCandidate = candidates[0];
-  const responseContent = isRecord(firstCandidate) && isRecord(firstCandidate.content) ? firstCandidate.content : null;
-  const parts = responseContent && Array.isArray(responseContent.parts) ? responseContent.parts : [];
-  const firstPart = parts[0];
-  if (!isRecord(firstPart) || typeof firstPart.text !== 'string') {
-    throw new ApiError(502, 'analysis-invalid-response', 'The analysis provider returned no usable observations.');
+  const choices = isRecord(payload) && Array.isArray(payload.choices) ? payload.choices : [];
+  const message = isRecord(choices[0]) && isRecord(choices[0].message) ? choices[0].message : null;
+  if (!message || typeof message.content !== 'string') {
+    throw new ApiError(502, 'vision-invalid-response', 'The vision provider returned no usable observations.');
   }
-  return parseModelResult(firstPart.text);
+  const observations = parseModelResult(message.content);
+  logAnalysisProgress(requestId, 'vision-completed', { provider: 'groq', model: GROQ_VISION_MODEL });
+  return observations;
 }
 
 function parseRoutineResult(text: string): RoutineGuidance {
@@ -277,7 +389,8 @@ function parseRoutineResult(text: string): RoutineGuidance {
   if (!isRecord(value)) throw new ApiError(502, 'routine-invalid-response', 'The routine service returned an unsupported response.');
   const readList = (key: keyof RoutineGuidance, max: number): string[] => {
     const list = value[key];
-    if (!Array.isArray(list) || list.length > max || list.some((entry) => typeof entry !== 'string' || !entry.trim() || entry.length > 240)) {
+    if (!Array.isArray(list) || list.length > max || list.some((entry) => typeof entry !== 'string'
+      || !entry.trim() || entry.length > 240 || !isSafeCosmeticText(entry))) {
       throw new ApiError(502, 'routine-invalid-response', 'The routine service returned unsupported guidance.');
     }
     return list as string[];
@@ -293,8 +406,9 @@ function parseRoutineResult(text: string): RoutineGuidance {
   return result;
 }
 
-async function generateRoutineWithGroq(env: Env, observations: SkinObservations): Promise<RoutineGuidance> {
+async function generateRoutineWithGroq(env: Env, observations: SkinObservations, requestId: string): Promise<RoutineGuidance> {
   const apiKey = required(env.GROQ_API_KEY, 'Groq');
+  logAnalysisProgress(requestId, 'groq-started');
   let response: Response;
   try {
     response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -338,7 +452,9 @@ async function generateRoutineWithGroq(env: Env, observations: SkinObservations)
   if (!message || typeof message.content !== 'string') {
     throw new ApiError(502, 'routine-invalid-response', 'The routine service returned no usable guidance.');
   }
-  return parseRoutineResult(message.content);
+  const routine = parseRoutineResult(message.content);
+  logAnalysisProgress(requestId, 'groq-completed');
+  return routine;
 }
 
 async function getStoredAnalysis(env: Env, userId: string, idempotencyKey: string): Promise<Record<string, unknown> | null> {
@@ -348,7 +464,7 @@ async function getStoredAnalysis(env: Env, userId: string, idempotencyKey: strin
     idempotency_key: `eq.${idempotencyKey}`,
     limit: '1',
   });
-  const response = await databaseRequest(env, `analysis_history?${query.toString()}`);
+  const response = await databaseRequest(env, `analysis_jobs?${query.toString()}`);
   const rows: unknown = await readJson(response);
   return Array.isArray(rows) && isRecord(rows[0]) ? rows[0] : null;
 }
@@ -372,12 +488,24 @@ async function reserveAnalysis(
   throw new ApiError(503, 'analysis-reservation-failed', 'Could not reserve an analysis request safely.');
 }
 
+function adminTestLimit(env: Env): number {
+  const configured = env.AI_ADMIN_TEST_MONTHLY_LIMIT?.trim();
+  if (!configured) return DEFAULT_ADMIN_TEST_LIMIT;
+  const limit = Number(configured);
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_ADMIN_TEST_LIMIT) {
+    throw new ApiError(503, 'admin-test-limit-misconfigured', 'The administrator test safety cap is not configured correctly.');
+  }
+  return limit;
+}
+
 async function updateAnalysis(env: Env, userId: string, idempotencyKey: string, result: AnalysisResult): Promise<void> {
-  const query = new URLSearchParams({ user_id: `eq.${userId}`, idempotency_key: `eq.${idempotencyKey}` });
-  await databaseRequest(env, `analysis_history?${query.toString()}`, {
-    method: 'PATCH',
-    headers: { Prefer: 'return=minimal' },
-    body: JSON.stringify({ status: 'complete', result, completed_at: result.createdAt }),
+  await databaseRequest(env, 'rpc/complete_skinsnap_analysis', {
+    method: 'POST',
+    body: JSON.stringify({
+      p_user_id: userId,
+      p_idempotency_key: idempotencyKey,
+      p_result: result,
+    }),
   });
 }
 
@@ -387,10 +515,10 @@ async function markAnalysisFailed(env: Env, userId: string, idempotencyKey: stri
     idempotency_key: `eq.${idempotencyKey}`,
     status: 'eq.processing',
   });
-  await databaseRequest(env, `analysis_history?${query.toString()}`, {
+  await databaseRequest(env, `analysis_jobs?${query.toString()}`, {
     method: 'PATCH',
     headers: { Prefer: 'return=minimal' },
-    body: JSON.stringify({ status: 'failed' }),
+    body: JSON.stringify({ status: 'failed', error_code: 'analysis-failed', updated_at: new Date().toISOString() }),
   });
 }
 
@@ -400,12 +528,16 @@ async function handleAnalysis(
   user: AuthenticatedUser,
   mode: 'premium' | 'development' = 'premium',
 ): Promise<Response> {
+  const requestId = safeClientRequestId(request);
+  let adminTestAccount = false;
   if (mode === 'development') {
     const allowedUserId = env.AI_DEV_TEST_USER_ID?.trim();
-    if (env.AI_DEV_TEST_ENABLED !== 'true' || !allowedUserId) {
+    const adminUserId = env.AI_ADMIN_TEST_USER_ID?.trim();
+    if (env.AI_DEV_TEST_ENABLED !== 'true' || (!allowedUserId && !adminUserId)) {
       throw new ApiError(404, 'not-found', 'This API endpoint does not exist.');
     }
-    if (user.id !== allowedUserId) {
+    adminTestAccount = Boolean(adminUserId && user.id === adminUserId);
+    if (!adminTestAccount && user.id !== allowedUserId) {
       throw new ApiError(403, 'development-test-not-authorized', 'This development analysis is limited to its authorized test account.');
     }
   }
@@ -413,12 +545,12 @@ async function handleAnalysis(
   if (!idempotencyKey || idempotencyKey.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(idempotencyKey)) {
     throw new ApiError(400, 'invalid-idempotency-key', 'A valid Idempotency-Key is required.');
   }
+  logAnalysisProgress(requestId, 'request-accepted');
   if (mode === 'premium') await verifyPremium(env, user.id);
   const contentLength = Number(request.headers.get('Content-Length') ?? 0);
   if (Number.isFinite(contentLength) && contentLength > MAX_ANALYSIS_PHOTO_BYTES + 256 * 1024) {
     throw new ApiError(413, 'photo-too-large', 'The prepared image is too large. Choose a smaller image or retake the photo.');
   }
-  required(env.GEMINI_API_KEY, 'Gemini');
   required(env.GROQ_API_KEY, 'Groq');
   const form = await request.formData();
   const file = form.get('photo');
@@ -428,13 +560,19 @@ async function handleAnalysis(
   if (!file.size || file.size > MAX_ANALYSIS_PHOTO_BYTES) {
     throw new ApiError(413, 'photo-too-large', 'The prepared image is too large. Choose a smaller image or retake the photo.');
   }
+  logAnalysisProgress(requestId, 'photo-received', { photoBytes: file.size, mimeType: file.type });
   const reservation = await reserveAnalysis(
     env,
     user.id,
     idempotencyKey,
-    mode === 'development' ? DEV_ANALYSIS_LIMIT : MONTHLY_ANALYSIS_LIMIT,
+    mode === 'development'
+      ? adminTestAccount ? adminTestLimit(env) : DEV_ANALYSIS_LIMIT
+      : MONTHLY_ANALYSIS_LIMIT,
   );
   if (reservation === 'limited') {
+    if (adminTestAccount) {
+      throw new ApiError(429, 'admin-test-cap-reached', 'The administrator development analysis safety cap has been reached for the rolling 30-day period.');
+    }
     throw new ApiError(429, 'rate-limited', 'You have reached the current analysis limit. Try again later.');
   }
   if (reservation === 'retry-limited') {
@@ -442,12 +580,13 @@ async function handleAnalysis(
   }
   if (reservation === 'existing') {
     const conflict = await getStoredAnalysis(env, user.id, idempotencyKey);
-    if (conflict?.status === 'complete' && isRecord(conflict.result)) return json(conflict.result);
+    if (conflict?.status === 'completed' && isRecord(conflict.result)) return json(conflict.result);
     throw new ApiError(409, 'request-in-progress', 'This analysis request was already received and is still being processed.');
   }
+  logAnalysisProgress(requestId, 'quota-reserved');
   try {
-    const observations = await analyzeWithGemini(env, file);
-    const routine = await generateRoutineWithGroq(env, observations);
+    const observations = await analyzeWithGroqVision(env, file, requestId);
+    const routine = await generateRoutineWithGroq(env, observations, requestId);
     const result: AnalysisResult = {
       ...observations,
       ...routine,
@@ -455,6 +594,7 @@ async function handleAnalysis(
       createdAt: new Date().toISOString(),
     };
     await updateAnalysis(env, user.id, idempotencyKey, result);
+    logAnalysisProgress(requestId, 'result-saved');
     return json(result, 201);
   } catch (error) {
     try {
@@ -475,11 +615,11 @@ async function handleHistory(env: Env, userId: string, url: URL): Promise<Respon
   const query = new URLSearchParams({
     select: 'result,created_at',
     user_id: `eq.${userId}`,
-    status: 'eq.complete',
+    status: 'eq.completed',
     order: 'created_at.desc',
     limit: String(limit),
   });
-  const response = await databaseRequest(env, `analysis_history?${query.toString()}`);
+  const response = await databaseRequest(env, `analysis_jobs?${query.toString()}`);
   const rows: unknown = await readJson(response);
   if (!Array.isArray(rows)) throw new ApiError(502, 'history-invalid-response', 'Could not read analysis history.');
   return json({ items: rows.flatMap((row) => isRecord(row) && isRecord(row.result) ? [row.result] : []) });
@@ -626,6 +766,7 @@ function applyCors(request: Request, env: Env, response: Response): Response {
   headers.set('Access-Control-Allow-Origin', origin);
   headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, Idempotency-Key');
+  headers.set('Access-Control-Expose-Headers', 'Retry-After');
   headers.set('Access-Control-Max-Age', '86400');
   headers.append('Vary', 'Origin');
   return new Response(response.body, { status: response.status, headers });
@@ -678,7 +819,8 @@ export default {
       response = await route(request, env);
     } catch (error) {
       if (error instanceof ApiError) {
-        response = json({ error: error.code, message: error.message }, error.status);
+        response = json({ error: error.code, message: error.message }, error.status,
+          error.retryAfterSeconds !== undefined ? { 'Retry-After': String(error.retryAfterSeconds) } : undefined);
       } else {
         console.error('SkinSnap API request failed', error instanceof Error ? error.name : 'unknown error');
         response = json({ error: 'internal-error', message: 'The request could not be completed. Please retry.' }, 500);

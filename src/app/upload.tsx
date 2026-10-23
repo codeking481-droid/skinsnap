@@ -6,6 +6,7 @@ import {
   Image,
   Linking,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -16,10 +17,11 @@ import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePhoto } from '../PhotoContext';
 import { backOrReplace } from '../navigation';
 import { validatePhoto } from '../photoValidation';
+import { PHOTO_ANALYSIS_CONSENT_VERSION } from '../privacy';
 
 function FaceGuide({ size }: { size: number }) {
   return (
@@ -31,7 +33,7 @@ function FaceGuide({ size }: { size: number }) {
 }
 
 export default function UploadScreen() {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { photoUri, setPhotoUri, photoUploadConsent, setPhotoUploadConsent, setAnalysisResult } = usePhoto();
   const [permission, requestPermission] = useCameraPermissions();
@@ -45,14 +47,18 @@ export default function UploadScreen() {
   const cameraRef = useRef<CameraView>(null);
   const scale = Math.max(0.9, Math.min(Math.min(width, 520) / 393, 1.08));
   const guideSize = Math.min(width - 96, 276) * (width < 380 ? 0.88 : 1);
+  const previewWidth = Math.min(width - insets.left - insets.right - 40, 420);
+  const previewHeight = Math.min(previewWidth / previewAspectRatio, Math.max(150, height * 0.38), 380);
 
   useEffect(() => {
     if (!photoUri) return;
+    let active = true;
     Image.getSize(photoUri, (imageWidth, imageHeight) => {
-      if (imageWidth > 0 && imageHeight > 0) {
-        setPreviewAspectRatio(Math.max(0.58, Math.min(imageWidth / imageHeight, 1.2)));
+      if (active && imageWidth > 0 && imageHeight > 0) {
+        setPreviewAspectRatio(imageWidth / imageHeight);
       }
-    }, () => setPreviewAspectRatio(0.76));
+    }, () => { if (active) setPreviewAspectRatio(0.76); });
+    return () => { active = false; };
   }, [photoUri]);
 
   useEffect(() => {
@@ -153,7 +159,7 @@ export default function UploadScreen() {
     setPhotoConsent(false);
   };
 
-  if (!cameraPermission) {
+  if (!photoUri && !cameraPermission) {
     return (
       <View style={styles.screen}>
         <LinearGradient colors={['#090B10', '#120C12', '#050609']} style={StyleSheet.absoluteFill} />
@@ -172,7 +178,7 @@ export default function UploadScreen() {
     );
   }
 
-  if (!cameraPermission.granted) {
+  if (!photoUri && cameraPermission && !cameraPermission.granted) {
     return (
       <View style={styles.screen}>
         <LinearGradient colors={['#090B10', '#120C12', '#050609']} style={StyleSheet.absoluteFill} />
@@ -204,40 +210,66 @@ export default function UploadScreen() {
     return (
       <View style={styles.screen}>
         <LinearGradient colors={['#090B10', '#120C12', '#050609']} style={StyleSheet.absoluteFill} />
-        <View style={[styles.previewScreen, { paddingTop: Math.max(insets.top, 18), paddingBottom: Math.max(insets.bottom, 22) }]}>
+        <SafeAreaView style={styles.previewSafeArea} edges={['top', 'bottom', 'left', 'right']}>
+        <ScrollView
+          style={styles.previewScroll}
+          contentContainerStyle={[
+            styles.previewScreen,
+            { paddingBottom: Math.max(insets.bottom, 16) + 16 },
+          ]}
+          contentInsetAdjustmentBehavior="never"
+          automaticallyAdjustContentInsets={false}
+          keyboardShouldPersistTaps="handled"
+          removeClippedSubviews={false}
+        >
+        <View style={[styles.previewContent, { width: previewWidth }]}>
           <View style={styles.previewHeader}>
-            <Pressable accessibilityRole="button" onPress={() => retakePhoto()} style={[styles.iconButton, { width: 42 * scale, height: 42 * scale }]}>
-              <Svg width={22 * scale} height={22 * scale} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><Path d="m15 18-6-6 6-6" /></Svg>
+            <Pressable accessibilityRole="button" accessibilityLabel="Back to camera" onPress={() => retakePhoto()} style={[styles.iconButton, styles.previewBack]}>
+              <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><Path d="m15 18-6-6 6-6" /></Svg>
             </Pressable>
-            <Text style={[styles.previewHeadline, { fontSize: 22 * scale, lineHeight: 28 * scale }]}>Photo preview</Text>
-            <View style={[styles.iconButton, { width: 42 * scale, height: 42 * scale, opacity: 0 }]} />
+            <Text accessibilityRole="header" style={styles.previewHeadline}>Photo preview</Text>
+            <View style={styles.previewBack} />
           </View>
 
-          <View style={[styles.previewCard, { width: Math.min(width - 30, 420), borderRadius: 26 * scale }]}>
-            <Image source={{ uri: photoUri }} style={[styles.previewImage, { aspectRatio: previewAspectRatio }]} resizeMode="contain" />
+          <View style={styles.previewCard}>
+            <Image source={{ uri: photoUri }} accessibilityLabel="Your selected photo" style={[styles.previewImage, { height: previewHeight }]} resizeMode="contain" />
             <LinearGradient colors={['rgba(7,7,12,0.1)', 'rgba(7,7,12,0.0)', 'rgba(7,7,12,0.13)']} style={StyleSheet.absoluteFill} pointerEvents="none" />
           </View>
 
-          <View style={[styles.previewTips, { width: Math.min(width - 30, 420), borderRadius: 18 * scale, marginTop: 18 * scale, paddingVertical: 14 * scale, paddingHorizontal: 16 * scale }]}>
-            <Text style={[styles.tipsTitle, { fontSize: 13 * scale }]}>Photo quality guide</Text>
-            <Text style={[styles.tipsBody, { fontSize: 12 * scale, lineHeight: 18 * scale }]}>Use natural light and avoid filters.{ '\n' }This screen does not detect faces; choose a photo where your face is clearly visible.</Text>
+          <View style={styles.previewTips}>
+            <Text style={styles.tipsTitle}>Photo quality guide</Text>
+            <Text style={styles.tipsBody}>Use natural light and avoid filters.{ '\n' }This screen does not detect faces; choose a photo where your face is clearly visible.</Text>
           </View>
 
-          <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: photoConsent }} onPress={() => setPhotoConsent((value) => !value)} style={[styles.consentRow, { width: Math.min(width - 30, 420), marginTop: 16 * scale }]}>
+          <Pressable
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: photoConsent }}
+            accessibilityLabel="Consent to securely process this photo for skin analysis"
+            onPress={() => setPhotoConsent((value) => !value)}
+            style={styles.consentRow}
+          >
             <View style={[styles.checkbox, photoConsent && styles.checkboxActive]}>{photoConsent && <Text style={styles.checkmark}>✓</Text>}</View>
-            <Text style={[styles.consentText, { fontSize: 11 * scale, lineHeight: 16 * scale }]}>I consent to this photo being securely processed only when I request an authorized analysis.</Text>
+            <Text style={styles.consentText}>I consent to send this photo securely to SkinSnap and Google Gemini for cosmetic observations. Groq receives text observations, not the photo, to prepare general skincare guidance. Lighting and image quality can affect results; this is not medical advice. SkinSnap saves analysis results for account history. SkinSnap-controlled photo copies are not kept in analysis history, but provider handling follows their own terms.</Text>
           </Pressable>
-
-          <View style={[styles.previewActions, { width: Math.min(width - 30, 420), marginTop: 18 * scale, gap: 12 * scale }]}>
-            <Pressable accessibilityRole="button" onPress={useSelectedPhoto} style={[styles.primaryButton, { minHeight: 54 * scale, borderRadius: 27 * scale }]}>
-              <LinearGradient colors={['#FFB2C9', '#FF6DA5', '#FF6C9D']} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={StyleSheet.absoluteFill} />
-              <Text style={[styles.primaryButtonText, { fontSize: 15 * scale }]}>Use This Photo</Text>
+          <View style={styles.privacyLinks}>
+            <Text style={styles.consentVersion}>Disclosure {PHOTO_ANALYSIS_CONSENT_VERSION}</Text>
+            <Pressable accessibilityRole="link" onPress={() => router.push('/privacy')} hitSlop={8}>
+              <Text style={styles.privacyLink}>Privacy information</Text>
             </Pressable>
-            <Pressable accessibilityRole="button" onPress={retakePhoto} style={[styles.secondaryButton, { minHeight: 48 * scale, borderRadius: 24 * scale }]}>
-              <Text style={[styles.secondaryButtonText, { fontSize: 14 * scale }]}>Retake</Text>
+          </View>
+
+          <View style={styles.previewActions}>
+            <Pressable accessibilityRole="button" onPress={useSelectedPhoto} style={styles.primaryButton}>
+              <LinearGradient colors={['#FFB2C9', '#FF6DA5', '#FF6C9D']} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={StyleSheet.absoluteFill} />
+              <Text style={styles.primaryButtonText}>Use This Photo</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" onPress={retakePhoto} style={styles.secondaryButton}>
+              <Text style={styles.secondaryButtonText}>Retake</Text>
             </Pressable>
           </View>
         </View>
+        </ScrollView>
+        </SafeAreaView>
       </View>
     );
   }
@@ -279,7 +311,7 @@ export default function UploadScreen() {
         </View>
       </View>
 
-      <View style={styles.cameraFooter}>
+      <View style={[styles.cameraFooter, { paddingBottom: insets.bottom + 24 }]}>
         <Text style={[styles.helperText, { fontSize: 13 * scale, lineHeight: 18 * scale }]}>Position your face inside the frame.</Text>
         <View style={[styles.cameraControls, { width: Math.min(width - 40, 420), marginTop: 12 * scale }]}>
           <Pressable accessibilityRole="button" onPress={chooseFromGallery} style={[styles.galleryButton, { width: 64 * scale, height: 64 * scale, borderRadius: 22 * scale }]}>
@@ -327,22 +359,29 @@ const styles = StyleSheet.create({
   galleryButton: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#F2EAEF', borderColor: '#E7D6DE', borderWidth: 1 },
   shutterButton: { alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: 'rgba(255,255,255,0.8)', backgroundColor: 'rgba(255,255,255,0.08)', shadowColor: '#FF5E97', shadowOpacity: 0.65, shadowRadius: 16, shadowOffset: { width: 0, height: 0 } },
   shutterInner: { backgroundColor: '#FFFFFF', borderWidth: 4, borderColor: '#FF6EA4' },
-  previewScreen: { flex: 1, alignItems: 'center', justifyContent: 'flex-start' },
-  previewHeader: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 18 },
-  previewHeadline: { color: '#F7F5F9', fontFamily: 'InterExtraBold', textAlign: 'center' },
-  previewCard: { overflow: 'hidden', backgroundColor: '#201E24', borderWidth: 1, borderColor: '#F6CDD8', marginTop: 22 },
+  previewSafeArea: { flex: 1 },
+  previewScroll: { flex: 1 },
+  previewScreen: { flexGrow: 1, alignItems: 'center', paddingHorizontal: 20, paddingTop: 12 },
+  previewContent: { gap: 16 },
+  previewHeader: { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 8 },
+  previewBack: { width: 48, height: 48, flexShrink: 0 },
+  previewHeadline: { flex: 1, color: '#F7F5F9', fontFamily: 'InterExtraBold', textAlign: 'center', fontSize: 24, lineHeight: 31 },
+  previewCard: { overflow: 'hidden', backgroundColor: '#201E24', borderWidth: 1, borderColor: '#F6CDD8', borderRadius: 24 },
   previewImage: { width: '100%', backgroundColor: '#1A1A1D' },
-  previewTips: { backgroundColor: 'rgba(244, 232, 237, 0.92)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.24)' },
-  tipsTitle: { color: '#090B10', fontFamily: 'InterSemibold' },
-  tipsBody: { color: '#2E2A32', fontFamily: 'InterRegular', marginTop: 4 },
-  consentRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  checkbox: { width: 18, height: 18, borderRadius: 5, borderWidth: 1.5, borderColor: '#D4CED5', alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' },
+  previewTips: { backgroundColor: 'rgba(244, 232, 237, 0.92)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.24)', borderRadius: 18, padding: 16 },
+  tipsTitle: { color: '#090B10', fontFamily: 'InterSemibold', fontSize: 15, lineHeight: 21 },
+  tipsBody: { color: '#2E2A32', fontFamily: 'InterRegular', marginTop: 4, fontSize: 14, lineHeight: 21 },
+  consentRow: { width: '100%', flexDirection: 'row', alignItems: 'flex-start', gap: 12, minHeight: 56, paddingVertical: 8 },
+  checkbox: { width: 28, height: 28, marginTop: 2, flexShrink: 0, borderRadius: 7, borderWidth: 1.5, borderColor: '#D4CED5', alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' },
   checkboxActive: { backgroundColor: '#FF6D9A', borderColor: '#FF6D9A' },
   checkmark: { color: '#06070A', fontFamily: 'InterExtraBold', fontSize: 12 },
-  consentText: { color: '#D7D6DE', fontFamily: 'InterRegular', flex: 1 },
-  previewActions: { alignItems: 'stretch' },
-  primaryButton: { position: 'relative', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  primaryButtonText: { color: '#090B10', fontFamily: 'InterExtraBold', zIndex: 1 },
-  secondaryButton: { backgroundColor: 'rgba(18, 18, 21, 0.94)', borderColor: 'rgba(255,255,255,0.15)', borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  secondaryButtonText: { color: '#F6F5F8', fontFamily: 'InterSemibold' },
+  consentText: { color: '#D7D6DE', fontFamily: 'InterRegular', flex: 1, fontSize: 14, lineHeight: 21 },
+  privacyLinks: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: -8 },
+  consentVersion: { color: '#AAA4AF', fontFamily: 'InterRegular', fontSize: 11 },
+  privacyLink: { color: '#FF8FB2', fontFamily: 'InterSemibold', fontSize: 12, textDecorationLine: 'underline' },
+  previewActions: { width: '100%', alignItems: 'stretch', gap: 10 },
+  primaryButton: { position: 'relative', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', minHeight: 56, borderRadius: 28, paddingHorizontal: 16, paddingVertical: 14 },
+  primaryButtonText: { color: '#090B10', fontFamily: 'InterExtraBold', zIndex: 1, fontSize: 16, lineHeight: 23, textAlign: 'center' },
+  secondaryButton: { backgroundColor: 'rgba(18, 18, 21, 0.94)', borderColor: 'rgba(255,255,255,0.15)', borderWidth: 1, alignItems: 'center', justifyContent: 'center', minHeight: 48, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 12 },
+  secondaryButtonText: { color: '#F6F5F8', fontFamily: 'InterSemibold', fontSize: 15, lineHeight: 22, textAlign: 'center' },
 });

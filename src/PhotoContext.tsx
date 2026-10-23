@@ -1,10 +1,12 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
 import type { SkinAnalysisResult } from './services/analysisApi';
+import { PHOTO_ANALYSIS_CONSENT_VERSION, isCurrentPhotoAnalysisConsent } from './privacy';
 
 type PhotoState = {
   photoUri: string | null;
   setPhotoUri: (uri: string | null) => void;
   photoUploadConsent: boolean;
+  photoUploadConsentVersion: string | null;
   setPhotoUploadConsent: (consent: boolean) => void;
   analysisResult: SkinAnalysisResult | null;
   setAnalysisResult: (result: SkinAnalysisResult | null) => void;
@@ -13,16 +15,21 @@ const PhotoContext = createContext<PhotoState | null>(null);
 
 export function PhotoProvider({ children }: { children: ReactNode }) {
   const [photoUri, setPhotoUri] = useState<string | null>(null);
-  const [photoUploadConsent, setPhotoUploadConsent] = useState(false);
+  const [photoUploadConsentVersion, setPhotoUploadConsentVersion] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<SkinAnalysisResult | null>(null);
+  const photoUploadConsent = isCurrentPhotoAnalysisConsent(photoUploadConsentVersion);
+  const setPhotoUploadConsent = (consent: boolean) => {
+    setPhotoUploadConsentVersion(consent ? PHOTO_ANALYSIS_CONSENT_VERSION : null);
+  };
   const value = useMemo(() => ({
     photoUri,
     setPhotoUri,
     photoUploadConsent,
+    photoUploadConsentVersion,
     setPhotoUploadConsent,
     analysisResult,
     setAnalysisResult,
-  }), [analysisResult, photoUri, photoUploadConsent]);
+  }), [analysisResult, photoUri, photoUploadConsent, photoUploadConsentVersion]);
   return <PhotoContext.Provider value={value}>{children}</PhotoContext.Provider>;
 }
 

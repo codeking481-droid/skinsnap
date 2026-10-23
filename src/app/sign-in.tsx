@@ -17,10 +17,12 @@ import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AuthApiError, authenticateWithEmail, deleteAccountData, signOut } from '../services/authApi';
 import { verifyAuthenticatedSession } from '../services/session';
+import { usePhoto } from '../PhotoContext';
 
 export default function SignInScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const { setPhotoUri, setPhotoUploadConsent, setAnalysisResult } = usePhoto();
   const [mode, setMode] = useState<'sign-in' | 'sign-up'>('sign-in');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -66,7 +68,7 @@ export default function SignInScreen() {
   const confirmDelete = () => {
     Alert.alert(
       'Delete your account and data?',
-      'This permanently deletes your SkinSnap account, saved analysis history, routines, and progress. This cannot be undone.',
+      'This permanently deletes your Supabase account and attempts to remove account-scoped routine progress saved on this device. Related server records depend on the database relationships, and provider-held copies are not deleted by the app. This cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -79,9 +81,18 @@ export default function SignInScreen() {
               try {
                 await deleteAccountData();
                 setSignedIn(false);
+                setPhotoUri(null);
+                setPhotoUploadConsent(false);
+                setAnalysisResult(null);
                 setMessage('Your account and SkinSnap data were deleted.');
                 returnToPreviousScreen();
               } catch (error) {
+                if (error instanceof AuthApiError && error.accountDeleted) {
+                  setSignedIn(false);
+                  setPhotoUri(null);
+                  setPhotoUploadConsent(false);
+                  setAnalysisResult(null);
+                }
                 setMessage(error instanceof AuthApiError ? error.message : 'Account deletion could not be confirmed. Please retry.');
               } finally {
                 setBusy(false);
