@@ -40,12 +40,12 @@ export default function PrivacyScreen() {
           <Text style={styles.lead}>A plain-language summary of how the current app handles your photo and account data.</Text>
 
           <Section title="Photo processing">
-            <Text style={styles.copy}>Only submit a photo after you give explicit consent. SkinSnap prepares a JPEG copy on your device and sends it over HTTPS to the authenticated SkinSnap service. The service sends the image to Google Gemini for cosmetic visual observations. The current Worker code does not save the raw image to Supabase; it holds and processes the upload in request memory.</Text>
+            <Text style={styles.copy}>Only submit a photo after you give explicit consent. SkinSnap prepares a JPEG copy on your device and sends it over HTTPS to the authenticated SkinSnap service. The service sends the image to Groq for cosmetic visual observations. The current Worker code does not save the raw image to Supabase; it holds and processes the upload in request memory.</Text>
             <Text style={styles.copy}>SkinSnap attempts to remove its prepared JPEG file after the request ends. If cleanup fails, the app reports that error. A camera or gallery source file is not deleted by SkinSnap, and the operating system may retain temporary source files in its app or media storage.</Text>
           </Section>
 
           <Section title="AI providers and results">
-            <Text style={styles.copy}>Google Gemini receives the image. Groq receives text observations, not the image, to generate general morning and evening skincare guidance. Lighting, camera quality, and filters can affect observations. Results are cosmetic information only, not a diagnosis or medical advice.</Text>
+            <Text style={styles.copy}>Groq receives the image for visual observations, then text observations and any optional routine preferences to generate general morning and evening skincare guidance. Preferences stay in the app session; SkinSnap saves the generated results, not a separate preference profile. Lighting, camera quality, and filters can affect observations. Results are cosmetic information only, not a diagnosis or medical advice.</Text>
             <Text style={styles.copy}>SkinSnap saves structured analysis results for account history and routine screens. Provider-side logs, review, and retention are controlled by each provider’s terms and account settings; SkinSnap cannot delete provider-held copies through this app.</Text>
           </Section>
 

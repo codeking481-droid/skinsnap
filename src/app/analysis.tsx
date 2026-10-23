@@ -137,7 +137,7 @@ export default function AnalysisScreen() {
               : errorMessage && errorCode === 'photo-unavailable'
                 ? `Photo preparation failed · ${stageLabel(errorStage)}. No photo was uploaded and no AI request was sent. ${errorMessage}`
                 : errorMessage && ['vision', 'gemini', 'groq', 'database'].includes(errorStage ?? '')
-                  ? 'SkinSnap could not complete your analysis right now. Please try again shortly.'
+                  ? errorMessage
                 : errorMessage && errorStage
                   ? errorCode === 'rate-limited'
                     ? `${stageLabel(errorStage)} · ${errorMessage}`
@@ -193,9 +193,9 @@ export default function AnalysisScreen() {
                 ? <Pressable accessibilityRole="button" onPress={retry} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
                   <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>Retry after test access is fixed</Text></LinearGradient>
                 </Pressable>
-              : errorCode === 'retry-limit'
+              : errorCode === 'retry-limit' || errorCode === 'photo-not-suitable'
                 ? <Pressable accessibilityRole="button" onPress={returnToUpload} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
-                  <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>Start a new scan</Text></LinearGradient>
+                  <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>{errorCode === 'photo-not-suitable' ? 'Choose a clearer photo' : 'Start a new scan'}</Text></LinearGradient>
                 </Pressable>
               : <Pressable accessibilityRole="button" onPress={retry} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
                 <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>{errorCode === 'photo-unavailable' ? 'Retry photo preparation' : errorCode === 'network-error' ? 'Retry same analysis request' : 'Retry secure analysis'}</Text></LinearGradient>

@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePhoto } from '../PhotoContext';
+import { visibilityLabel } from '../analysisQuality';
 
 const CATEGORY_LABELS: Record<string, string> = {
   'visible-shine': 'Visible shine',
@@ -32,7 +33,7 @@ export default function ResultsScreen() {
           {analysisResult ? (
             <>
               <Text style={[styles.heading, { fontSize: 29 * scale, lineHeight: 36 * scale, marginTop: 7 * scale }]}>Your Skin<Text style={styles.pink}> Insights</Text></Text>
-              <Text style={[styles.subheading, { fontSize: 10 * scale, marginTop: 5 * scale }]}>REAL SERVICE RESPONSE · NON-DIAGNOSTIC OBSERVATIONS</Text>
+              <Text style={[styles.subheading, { fontSize: 10 * scale, marginTop: 5 * scale }]}>VISIBLE FEATURES · GENTLE GUIDANCE</Text>
               <View style={[styles.summary, { borderRadius: 19 * scale, padding: 17 * scale, marginTop: 16 * scale }]}>
                 {photoUri && <Image source={{ uri: photoUri }} style={[styles.photo, { width: 66 * scale, height: 66 * scale, borderRadius: 34 * scale }]} resizeMode="cover" accessible accessibilityLabel="Photo used for this requested analysis" />}
                 <Text style={[styles.summaryTitle, { fontSize: 15 * scale, marginTop: photoUri ? 11 * scale : 0 }]}>Overview</Text>
@@ -47,12 +48,18 @@ export default function ResultsScreen() {
               {analysisResult.observations.map((observation, index) => (
                 <View key={`${observation.category}-${index}`} style={[styles.observation, { borderRadius: 15 * scale, padding: 14 * scale, marginBottom: 7 * scale }]}>
                   <View style={styles.observationHeader}>
-                    <Text style={[styles.observationTitle, { fontSize: 13 * scale }]}>{CATEGORY_LABELS[observation.category]}</Text>
-                    <Text style={[styles.confidence, { fontSize: 9 * scale }]}>{observation.confidence} confidence</Text>
+                    <Text style={[styles.observationTitle, { fontSize: 13 * scale }]}>{observation.title ?? CATEGORY_LABELS[observation.category]}</Text>
+                    <Text style={[styles.confidence, { fontSize: 9 * scale }]}>{visibilityLabel(observation)}</Text>
                   </View>
                   <Text style={[styles.body, { fontSize: 11.5 * scale, lineHeight: 17 * scale, marginTop: 5 * scale }]}>{observation.observation}</Text>
+                  {observation.location && <Text style={[styles.timestamp, { fontSize: 11 * scale, marginTop: 7 * scale }]}>Visible area: {observation.location}</Text>}
                 </View>
               ))}
+              {analysisResult.observations.length === 0 && <Text style={[styles.body, { fontSize: 12 * scale, lineHeight: 18 * scale }]}>No distinct cosmetic features could be reliably described in this photo. We have not filled the report with guesses.</Text>}
+              {analysisResult.limitations && <View style={[styles.qualityNotice, { borderRadius: 14 * scale, padding: 12 * scale, marginTop: 10 * scale }]}>
+                <Text style={[styles.summaryTitle, { fontSize: 13 * scale }]}>What this photo cannot tell us</Text>
+                {analysisResult.limitations.map((limitation, index) => <Text key={index} style={[styles.qualityText, { fontSize: 11 * scale, lineHeight: 17 * scale, marginTop: 6 * scale }]}>{limitation}</Text>)}
+              </View>}
 
               <Text style={[styles.disclaimer, { fontSize: 9.5 * scale, lineHeight: 14 * scale, marginTop: 9 * scale }]}>
                 Lighting, camera quality and filters can affect observations. This is not a medical diagnosis or a substitute for professional care.

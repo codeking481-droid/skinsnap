@@ -19,7 +19,7 @@
       <p><strong>Product:</strong> SkinSnap, a product of Alphatekx. <strong>Legal operator:</strong> [LEGAL ENTITY NAME AND FORM REQUIRED]. <strong>Effective date:</strong> [SET BEFORE PUBLICATION]. <strong>Privacy contact:</strong> [VERIFIED EMAIL OR WEB CONTACT REQUIRED].</p>
 
       <h2>Information processed</h2>
-      <p>When you choose and consent to a photo analysis, SkinSnap receives the selected image through the app. The app prepares a temporary JPEG copy and sends it over HTTPS to the authenticated SkinSnap service. SkinSnap's current Worker sends the image inline to Google Gemini for visible, non-diagnostic cosmetic observations. It sends text observations, not the photo, to Groq to generate general skincare guidance.</p>
+      <p>When you choose and consent to a photo analysis, SkinSnap receives the selected image through the app. The app prepares a temporary JPEG copy and sends it over HTTPS to the authenticated SkinSnap service. SkinSnap's current Worker sends the image inline to Groq for visible, non-diagnostic cosmetic observations. It then sends text observations and any optional, self-reported routine preferences to Groq to generate general skincare guidance.</p>
       <p>The app does not intentionally store the raw image in its analysis database. It attempts to delete its prepared JPEG when request handling ends. The selected source image is not deleted by SkinSnap; camera/picker temporary files may remain subject to Android and app-cache behavior. An interrupted app may not complete temporary-file cleanup.</p>
       <p>Structured analysis results, routines, account identifiers, and account/profile data may be stored in Supabase for history, routine presentation, and account operation. Routine-completion progress is stored in an app document on the device. Session tokens are stored using the platform secure store.</p>
 
@@ -28,8 +28,8 @@
       <p>Results are informational and can be affected by lighting, camera quality, and filters. SkinSnap is not a medical device and does not diagnose, treat, cure, or prevent any condition. Consult a qualified healthcare professional about medical concerns.</p>
 
       <h2>Service providers and international processing</h2>
-      <p>SkinSnap uses Cloudflare Workers for its API, Supabase for authentication and structured data, Google Gemini for image analysis, and Groq for text-based routine generation. Provider-side logs, retention, security, and international processing are governed by their terms, account settings, and applicable agreements. SkinSnap cannot remove provider-held copies through this app.</p>
-      <p>Google's Gemini API terms differ for paid and unpaid service. The project’s billing status and regional eligibility must be confirmed before this draft can be published. Groq states that inference data is not retained by default but can be retained temporarily for reliability or abuse monitoring; project settings have not been confirmed.</p>
+      <p>SkinSnap uses Cloudflare Workers for its API, Supabase for authentication and structured data, Groq for image analysis and text-based routine generation. Provider-side logs, retention, security, and international processing are governed by their terms, account settings, and applicable agreements. SkinSnap cannot remove provider-held copies through this app.</p>
+      <p>Groq states that inference data is not retained by default but can be retained temporarily for reliability or abuse monitoring; project settings have not been confirmed.</p>
 
       <h2>Retention and deletion</h2>
       <p>SkinSnap does not configure an expiration period for saved analysis results in the inspected application. The app offers authenticated account deletion under Progress → Account &amp; data settings. The live database’s full deletion-cascade behavior and provider-side deletion are not yet verified. Do not treat a successful app response as proof that every provider copy was deleted.</p>
@@ -40,7 +40,7 @@
       <p>These controls do not guarantee complete security or erase provider records. Contact the operator at [VERIFIED PRIVACY CONTACT REQUIRED] for questions or requests.</p>
 
       <h2>Children and age restrictions</h2>
-      <p>Age eligibility must be established before publication. Google's current Gemini API terms restrict API clients directed to or likely accessed by individuals under 18. SkinSnap's intended age audience and effective safeguards require owner and legal review.</p>
+      <p>Age eligibility must be established before publication. SkinSnap's intended age audience and effective safeguards require owner and legal review.</p>
 
       <h2>Policy changes</h2>
       <p>Update this policy before changing data collection, AI providers, retention, account deletion, or billing behavior. The publication date and version must be set by the operator.</p>

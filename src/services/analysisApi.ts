@@ -13,6 +13,7 @@ import { getVerifiedEntitlement } from './billing';
 import { getSessionToken, verifyAuthenticatedSession } from './session';
 import { isAnalysisResponseAllowed } from '../subscriptionRules';
 import { isSafeCosmeticText } from '../routinePresentation';
+import { parseAnalysisQuality, parseObservationEvidence, type AnalysisQuality, type ObservationEvidence } from '../analysisQuality';
 import {
   analysisFailureStage,
   analysisRequestTimeoutMs,
@@ -48,13 +49,13 @@ const OBSERVATION_CATEGORIES = [
   'general-texture',
 ] as const;
 
-export type SkinObservation = {
+export type SkinObservation = ObservationEvidence & {
   category: typeof OBSERVATION_CATEGORIES[number];
   observation: string;
   confidence: 'low' | 'moderate' | 'high';
 };
 
-export type SkinAnalysisResult = {
+export type SkinAnalysisResult = AnalysisQuality & {
   resultId: string;
   createdAt: string;
   imageQuality: 'clear' | 'limited';
@@ -66,6 +67,7 @@ export type SkinAnalysisResult = {
 };
 
 export type AnalysisErrorCode =
+  | 'photo-not-suitable'
   | 'subscription-required'
   | 'development-test-not-authorized'
   | 'development-test-unavailable'
@@ -185,7 +187,11 @@ export function parseAnalysisResult(value: unknown): SkinAnalysisResult {
       || !['low', 'moderate', 'high'].includes(String(item.confidence))) {
       throw new AnalysisRequestError('invalid-response', 'The analysis service returned an unsupported observation.');
     }
+    let evidence: ObservationEvidence;
+    try { evidence = parseObservationEvidence(item, isSafeCosmeticText); }
+    catch { throw new AnalysisRequestError('invalid-response', 'The observation evidence could not be validated.'); }
     return {
+      ...evidence,
       category: item.category as SkinObservation['category'],
       observation: item.observation,
       confidence: item.confidence as SkinObservation['confidence'],
@@ -198,7 +204,12 @@ export function parseAnalysisResult(value: unknown): SkinAnalysisResult {
     return item;
   });
 
+  let quality: AnalysisQuality;
+  try { quality = parseAnalysisQuality(value, isSafeCosmeticText); }
+  catch { throw new AnalysisRequestError('invalid-response', 'The photo quality assessment could not be validated.'); }
+  if (quality.imageAssessment?.usable === false) throw new AnalysisRequestError('invalid-response', 'This photo was not suitable for a completed analysis.');
   return {
+    ...quality,
     resultId: value.resultId,
     createdAt: value.createdAt,
     imageQuality: value.imageQuality as SkinAnalysisResult['imageQuality'],
@@ -473,12 +484,18 @@ export async function requestSkinAnalysis(
     clearTimeout(timeout);
   }
 
-  const serverErrorCode = response.ok ? null : safeServerErrorCode(await readServiceErrorCode(response));
+  const serverErrorCode = response.ok ? null : safeServerErrorCode(await readServiceErrorCode(response.clone()));
   const diagnostic = {
     requestId,
     httpStatus: response.status,
     serverErrorCode,
   };
+  if (response.status === 422 && serverErrorCode === 'photo-not-suitable') {
+    const body: unknown = await response.clone().json().catch(() => null);
+    const guidance = isRecord(body) && isShortText(body.message, 300) && isSafeCosmeticText(body.message)
+      ? body.message : 'Choose a sharp photo with skin clearly visible in even light, without filters.';
+    throw new AnalysisRequestError('photo-not-suitable', guidance, 'vision');
+  }
 
   if (response.status === 401) {
     logStageFailure('authentication', serverErrorCode ?? 'http-401', diagnostic);

@@ -1,0 +1,14 @@
+{
+  "provenance": "Entirely synthetic fictional adults made with the built-in imagegen tool; no customer photographs. Prompted features are evaluation intentions, not clinical ground truth.",
+  "cases": [
+    { "id": "shine-light", "file": "shine-light.png", "expectUsable": true, "expectedCategory": "visible-shine", "preferences": { "complexity": "minimal", "sensitivity": "yes", "budget": "budget-friendly" } },
+    { "id": "texture-dark", "file": "texture-dark.png", "expectUsable": true, "expectedCategory": "general-texture" },
+    { "id": "blemishes-medium", "file": "blemishes-medium.png", "expectUsable": true, "expectedCategory": "visible-blemishes" },
+    { "id": "uneven-light", "file": "uneven-light.png", "expectUsable": null },
+    { "id": "blur", "file": "blur.png", "expectUsable": false },
+    { "id": "overexposed", "file": "overexposed.png", "expectUsable": false, "pending": true },
+    { "id": "filtered", "file": "filtered.png", "expectUsable": false, "pending": true },
+    { "id": "non-face", "file": "non-face.png", "expectUsable": false }
+  ],
+  "review": ["Review localized shine, texture and blemish-like features against the images, not merely schema compliance.", "Compare the three different skin tones without demographic inference or treating natural tone as a flaw.", "Compare shine-light and blemishes-medium outputs for meaningful differences; sameness is not personalization.", "A detected filter is not proof; review false acceptances and do not claim reliable filter detection."]
+}

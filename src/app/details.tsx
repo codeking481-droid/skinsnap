@@ -5,6 +5,7 @@ import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePhoto } from '../PhotoContext';
 import { backOrReplace } from '../navigation';
+import { visibilityLabel } from '../analysisQuality';
 
 const CATEGORY_LABELS: Record<string, string> = {
   'visible-shine': 'Visible shine',
@@ -34,12 +35,15 @@ export default function DetailsScreen() {
         <View style={[styles.list, { gap: 9 * scale, marginTop: 14 * scale }]}>
           {analysisResult.observations.map((item, index) => <View key={`${item.category}-${index}`} style={[styles.card, { borderRadius: 17 * scale, padding: 15 * scale }]}>
             <View style={styles.cardHeading}>
-              <Text style={[styles.cardTitle, { fontSize: 14 * scale }]}>{CATEGORY_LABELS[item.category]}</Text>
-              <Text style={[styles.confidence, { fontSize: 9 * scale }]}>{item.confidence} confidence</Text>
+              <Text style={[styles.cardTitle, { fontSize: 14 * scale }]}>{item.title ?? CATEGORY_LABELS[item.category]}</Text>
+              <Text style={[styles.confidence, { fontSize: 9 * scale }]}>{visibilityLabel(item)}</Text>
             </View>
             <Text style={[styles.description, { fontSize: 11.5 * scale, lineHeight: 17 * scale, marginTop: 6 * scale }]}>{item.observation}</Text>
+            {item.location && <Text style={[styles.description, { fontSize: 11 * scale, lineHeight: 17 * scale, marginTop: 8 * scale }]}>Visible area: {item.location}</Text>}
+            {item.limitation && <Text style={[styles.disclaimer, { fontSize: 11 * scale, lineHeight: 17 * scale, marginTop: 5 * scale }]}>Keep in mind: {item.limitation}</Text>}
           </View>)}
         </View>
+        {analysisResult.limitations?.map((limitation, index) => <Text key={index} style={[styles.description, { fontSize: 12 * scale, lineHeight: 18 * scale, marginTop: 8 * scale }]}>{limitation}</Text>)}
         <View style={[styles.disclaimerCard, { borderRadius: 16 * scale, padding: 13 * scale, marginTop: 13 * scale }]}>
           <Text style={[styles.disclaimer, { fontSize: 10 * scale, lineHeight: 15 * scale }]}>Lighting, camera quality and image filters can change visible appearance. These observations are not a medical diagnosis and should not replace professional care.</Text>
         </View>

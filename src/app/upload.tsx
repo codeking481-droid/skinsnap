@@ -249,7 +249,7 @@ export default function UploadScreen() {
             style={styles.consentRow}
           >
             <View style={[styles.checkbox, photoConsent && styles.checkboxActive]}>{photoConsent && <Text style={styles.checkmark}>✓</Text>}</View>
-            <Text style={styles.consentText}>I consent to send this photo securely to SkinSnap and Google Gemini for cosmetic observations. Groq receives text observations, not the photo, to prepare general skincare guidance. Lighting and image quality can affect results; this is not medical advice. SkinSnap saves analysis results for account history. SkinSnap-controlled photo copies are not kept in analysis history, but provider handling follows their own terms.</Text>
+            <Text style={styles.consentText}>I consent to send this photo securely to SkinSnap and Groq for cosmetic photo observations and general skincare guidance. Groq receives the photo for visual analysis, then text observations and any optional preferences for routine guidance. Lighting and image quality can affect results; this is not medical advice. SkinSnap saves analysis results for account history. SkinSnap-controlled photo copies are not kept in analysis history, but provider handling follows their own terms.</Text>
           </Pressable>
           <View style={styles.privacyLinks}>
             <Text style={styles.consentVersion}>Disclosure {PHOTO_ANALYSIS_CONSENT_VERSION}</Text>
