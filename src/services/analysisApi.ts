@@ -467,7 +467,7 @@ async function performSkinAnalysis(
       );
       const upload = await file.upload(endpoint, {
         ...uploadRequest.options,
-        headers: { ...uploadRequest.options.headers, 'X-SkinSnap-Preferences': JSON.stringify(validatedPreferences) },
+        headers: { ...uploadRequest.options.headers, 'X-SkinSnap-Preferences': JSON.stringify(validatedPreferences).replace(/[\u007f-\uffff]/g, char => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0')) },
       });
       response = new Response(upload.body, { status: upload.status, headers: upload.headers });
     } else {
@@ -478,7 +478,7 @@ async function performSkinAnalysis(
       headers: {
         Authorization: `Bearer ${token}`,
         'Idempotency-Key': idempotencyKey,
-        'X-SkinSnap-Preferences': JSON.stringify(validatedPreferences),
+        'X-SkinSnap-Preferences': JSON.stringify(validatedPreferences).replace(/[\u007f-\uffff]/g, char => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0')),
       },
       body: form,
       signal: controller.signal,

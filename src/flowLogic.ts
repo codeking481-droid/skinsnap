@@ -21,7 +21,7 @@ export function sanitizeRoutineProgress(value: unknown): RoutineProgress {
   ]);
   const validStep = (item: unknown): item is string =>
     typeof item === 'string'
-    && (legacySteps.has(item) || /^(Morning|Evening)-[1-8]$/.test(item));
+    && (legacySteps.has(item) || /^(Morning|Evening)-[1-8]$/.test(item) || /^step-[a-zA-Z0-9-]{1,80}$/.test(item));
   const validDates = (item: unknown): item is string => {
     if (typeof item !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(item)) return false;
     const date = new Date(`${item}T00:00:00Z`);

@@ -14,13 +14,15 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { loadRoutineProgress, saveRoutineProgress } from '../routineStorage';
+import { loadCustomRoutine } from '../services/retentionApi';
+import { scheduledSteps, type CustomRoutine } from '../retention';
+import { Action } from '../components/RetentionUI';
 import { backOrReplace } from '../navigation';
 import { getRoutineProgressOwner } from '../services/userDataApi';
 import { loadAnalysisHistory, type AnalysisHistoryItem } from '../services/authApi';
 import {
   buildRoutineSteps,
   filterRoutineGuidance,
-  routineStepIds,
   routineTip,
   type RoutinePeriod,
   type RoutineStep,
@@ -50,6 +52,8 @@ export default function RoutineScreen() {
   const [period, setPeriod] = useState<RoutinePeriod>('Morning');
   const [completedDays, setCompletedDays] = useState<string[]>([]);
   const [checked, setChecked] = useState<string[]>([]);
+  const [customRoutine, setCustomRoutine] = useState<CustomRoutine | null>(null);
+  const [customNotice, setCustomNotice] = useState<string | null>(null);
   const [routineId, setRoutineId] = useState<string | undefined>();
   const [owner, setOwner] = useState<string | null>(null);
   const [routine, setRoutine] = useState<RoutineGuidance | null>(demoMode ? DEMO_ROUTINE : null);
@@ -63,13 +67,14 @@ export default function RoutineScreen() {
   const [progressChanged, setProgressChanged] = useState(false);
   const scale = Math.max(0.92, Math.min(Math.min(width, 520) / 393, 1.08));
 
-  const morningSteps = useMemo(() => buildRoutineSteps(routine?.morningRoutine ?? [], 'Morning'), [routine]);
-  const eveningSteps = useMemo(() => buildRoutineSteps(routine?.eveningRoutine ?? [], 'Evening'), [routine]);
+  const calendarDay = new Date().getDay();
+  const presentSteps = useCallback((value: RoutinePeriod): RoutineStep[] => customRoutine
+    ? scheduledSteps(customRoutine, calendarDay, value).map((step, index) => ({ id: step.id, order: index + 1, title: step.name, instructions: step.description || 'Your custom routine step.', category: 'Your own step', ingredients: [], frequency: 'On your selected days' }))
+    : buildRoutineSteps(value === 'Morning' ? routine?.morningRoutine ?? [] : routine?.eveningRoutine ?? [], value), [calendarDay, customRoutine, routine]);
+  const morningSteps = useMemo(() => presentSteps('Morning'), [presentSteps]);
+  const eveningSteps = useMemo(() => presentSteps('Evening'), [presentSteps]);
   const steps = period === 'Morning' ? morningSteps : eveningSteps;
-  const allStepIds = useMemo(
-    () => routineStepIds(routine?.morningRoutine ?? [], routine?.eveningRoutine ?? []),
-    [routine],
-  );
+  const allStepIds = useMemo(() => [...morningSteps, ...eveningSteps].map(step => step.id), [morningSteps, eveningSteps]);
 
   useFocusEffect(useCallback(() => {
     if (demoMode) return undefined;
@@ -80,6 +85,8 @@ export default function RoutineScreen() {
     setProgressChanged(false);
     setError(null);
     setRoutine(null);
+    setCustomRoutine(null);
+    setCustomNotice(null);
     void (async () => {
       try {
         let accountId: string | null = null;
@@ -103,13 +110,21 @@ export default function RoutineScreen() {
         const history = await loadAnalysisHistory();
         if (!active) return;
         const latest = history[0];
-        const currentRoutineId = latest?.resultId;
+        let custom: CustomRoutine | null = null;
+        try { custom = await loadCustomRoutine(); }
+        catch { if (active) setCustomNotice('Routine editing is awaiting the server update or is temporarily unavailable. Your saved AI guidance is shown below.'); }
+        if (!active) return;
+        setCustomRoutine(custom);
+        const currentRoutineId = custom ? 'custom-' + (custom.sourceResultId ?? 'manual') : latest?.resultId;
         const scopedProgress = await loadRoutineProgress(accountId, currentRoutineId);
         if (!active) return;
         setRoutineId(currentRoutineId);
         setChecked(scopedProgress.checkedSteps);
         setCompletedDays(scopedProgress.completedDays);
-        if (!latest) {
+        if (custom) {
+          setRoutine({ morningRoutine: custom.steps.filter(s => s.period === 'Morning').map(s => s.description || s.name), eveningRoutine: custom.steps.filter(s => s.period === 'Evening').map(s => s.description || s.name), precautions: [] });
+          setSafetyNotice("Your routine is customizable. SkinSnap doesn't verify the safety of products you add.");
+        } else if (!latest) {
           setRoutine(null);
         } else {
           const morning = filterRoutineGuidance(latest.morningRoutine);
@@ -126,7 +141,7 @@ export default function RoutineScreen() {
             setSafetyNotice(null);
           }
         }
-        setSyncStatus('Saved routine and progress are private to this account on this device.');
+        setSyncStatus(custom ? 'Your custom routine is saved to your secure profile. Checkmarks are saved on this device.' : 'Saved routine and progress are private to this account on this device.');
         setLoaded(true);
       } catch (cause) {
         if (!active) return;
@@ -196,8 +211,11 @@ export default function RoutineScreen() {
           {demoMode
             ? <Text style={[styles.demoNotice, { fontSize: 10 * scale, marginTop: 4 * scale }]}>DEMO ROUTINE · GENERAL EXAMPLE, NOT PERSONALIZED</Text>
             : routine
-              ? <Text style={[styles.demoNotice, { fontSize: 10 * scale, marginTop: 4 * scale }]}>YOUR SAVED AI-ASSISTED GUIDANCE · NON-DIAGNOSTIC</Text>
+              ? <Text style={[styles.demoNotice, { fontSize: 10 * scale, marginTop: 4 * scale }]}>{customRoutine ? 'YOUR CUSTOM ROUTINE' : 'YOUR SAVED AI-ASSISTED GUIDANCE'} · NON-DIAGNOSTIC</Text>
               : null}
+          <Action secondary label="Edit my routine" onPress={() => router.push('/routine-edit')} />
+          <Action secondary label="My Skin Diary" onPress={() => router.push('/skin-diary')} />
+          {customNotice && <Text style={styles.syncStatus}>{customNotice}</Text>}
           {safetyNotice && <Text accessibilityRole="alert" style={[styles.safetyNotice, { fontSize: 12 * scale, lineHeight: 18 * scale, marginTop: 8 * scale }]}>{safetyNotice}</Text>}
           <Text accessibilityLiveRegion="polite" style={[styles.syncStatus, { fontSize: 11 * scale, lineHeight: 16 * scale, marginTop: 5 * scale }]}>{syncStatus}</Text>
 
@@ -253,7 +271,7 @@ export default function RoutineScreen() {
                 {steps.filter((step) => checked.includes(step.id)).length} of {steps.length} {period.toLowerCase()} steps completed today
               </Text>
               <Text style={[styles.orderNote, { fontSize: 11 * scale, lineHeight: 17 * scale, marginTop: 12 * scale }]}>
-                Steps are shown in the order returned by your saved routine. Tap a step for its guidance.
+                Steps are shown in your saved order for today. Tap a step for its guidance.
               </Text>
               {steps.length ? steps.map((step) => {
                 const done = checked.includes(step.id);
@@ -285,6 +303,7 @@ export default function RoutineScreen() {
                 </View>
               )}
 
+              <Action secondary label="Reset today's checkmarks" onPress={() => { setProgressChanged(true); setChecked([]); setCompletedDays(current => current.filter(day => day !== todayKey)); }} />
               <View style={[styles.proTip, { borderRadius: 16 * scale, padding: 15 * scale, marginTop: 14 * scale }]}>
                 <View style={[styles.tipIcon, { width: 42 * scale, height: 42 * scale, borderRadius: 13 * scale }]}><TipBulb size={27 * scale} /></View>
                 <View style={styles.tipCopy}><Text style={[styles.tipTitle, { fontSize: 15 * scale }]}>Routine tip</Text><Text style={[styles.tipText, { fontSize: 12 * scale, lineHeight: 18 * scale, marginTop: 3 * scale }]}>{tip}</Text></View>

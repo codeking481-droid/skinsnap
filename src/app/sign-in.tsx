@@ -1,3 +1,4 @@
+import { Action as RetentionAction } from '../components/RetentionUI';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -183,7 +184,7 @@ export default function SignInScreen() {
               </Text>
             </View>
 
-            {signedIn ? (
+            <RetentionAction secondary label="My Skin Preferences" onPress={() => router.push('/skin-preferences')} /><RetentionAction secondary label="My Skin Diary" onPress={() => router.push('/skin-diary')} />{signedIn ? (
               <View style={[styles.form, { marginTop: 34 * scale }]}>
                 {anonymousSession && <Text style={styles.note}>
                   Guest recovery by email is not enabled. Clearing app data or reinstalling may make this profile and its saved history inaccessible. Use account deletion before leaving this profile if you want its configured server records removed.

@@ -83,3 +83,13 @@ HTTPS is used by the inspected mobile API/auth and provider endpoints. Session t
 - SQL: `supabase/migrations/202610210001_skinsnap_core.sql`, `supabase/migrations/202610220001_skinsnap_live_schema_compat.sql`.
 - Hosting/observability: `wrangler.jsonc`, `website/_headers`, `website/_redirects`.
 - Related worksheet: `docs/google-play/data-safety-review.md`.
+
+
+## Retention candidate - 2026-10-24 (not deployed)
+
+- Smart Capture reads dimensions and size, decodes a small temporary JPEG locally, and deletes the probe; no network analysis or photos are retained for diary use. Brightness, blur and face detection are not measured.
+- With explicit save permission, skincare_preferences holds bounded self-reported preferences. The secure guest/account owner comes from the authenticated JWT, never the request body. Relevant preferences accompany a consented routine request only; they do not enter vision evidence.
+- routines holds one versioned customization per user; the original analysis report stays unchanged. Steps have stable IDs, periods and selected weekdays. Checkmarks remain in the existing per-owner local file.
+- skin_diary_entries holds one entry per owner/local date, with time-zone context, optional feelings/notes/concerns/products and explicit completion reports. No photo field. No diary or customization data is sent to Groq.
+- New authenticated endpoints are guarded by RETENTION_ENABLED; local UI reports the server update as unavailable until approved rollout. No new provider, tracking SDK, logging payload or subscription rule.
+- New rows use RLS and auth.users cascading deletion. The Worker explicitly attempts deletion of the new tables before Auth, even if the feature switch is later disabled; it tolerates only an exact missing-optional-table PGRST205 response. Disabling the feature after rollout must keep the migration in place: Auth deletion still cascades through its foreign keys.

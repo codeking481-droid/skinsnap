@@ -1,3 +1,4 @@
+import { Action as RetentionAction } from '../components/RetentionUI';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -96,7 +97,7 @@ export default function WelcomeScreen() {
                 <Text style={[styles.replayLabel, { fontSize: 12 * scale, paddingVertical: 9 * scale }]}>Replay the introduction</Text>
               </Pressable>
             )}
-            <View style={styles.quickLinks}>
+            <RetentionAction secondary label="My Skin Preferences" onPress={() => router.push('/skin-preferences')} /><RetentionAction secondary label="My Skin Diary" onPress={() => router.push('/skin-diary')} /><View style={styles.quickLinks}>
               <Pressable accessibilityRole="button" onPress={() => router.push('/routine')} style={styles.quickLink}>
                 <Text style={styles.quickLinkTitle}>Your routine</Text>
                 <Text style={styles.quickLinkDetail}>Pick up where you left off</Text>

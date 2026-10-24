@@ -1,3 +1,4 @@
+import { Action as RetentionAction } from '../components/RetentionUI';
 import { useCallback, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -104,7 +105,7 @@ export default function ProgressScreen() {
       </View>
 
       <View style={[styles.card, { borderRadius: 19 * scale, padding: 17 * scale, marginTop: 12 * scale }]}>
-        <Text style={[styles.cardTitle, { fontSize: 16 * scale }]}>Analysis history</Text>
+        <RetentionAction secondary label="My Skin Preferences" onPress={() => router.push('/skin-preferences')} /><RetentionAction secondary label="My Skin Diary" onPress={() => router.push('/skin-diary')} /><Text style={[styles.cardTitle, { fontSize: 16 * scale }]}>Analysis history</Text>
         {historyLoading
           ? <Text style={[styles.copy, { fontSize: 11.5 * scale, lineHeight: 17 * scale, marginTop: 8 * scale }]}>Loading your private history…</Text>
           : historyError

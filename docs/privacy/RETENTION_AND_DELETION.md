@@ -34,3 +34,8 @@ The current live table definitions, constraints, storage bucket contents, and an
 3. Test valid, unauthorized, repeated, and controlled partial-failure deletion with a disposable account only.
 4. Verify provider retention settings, current legal obligations, and the public contact.
 5. Enable and deploy external deletion only after the hosted flow passes the disposable-account test.
+
+
+## Retention candidate - 2026-10-24 (not deployed)
+
+Preferences, custom routine edits and diary records are retained until individually removed or account deletion; no automatic expiry is configured. Saving preferences is opt-in. Diary Save is an explicit storage action. No offline persistent copy of preferences, routine edits or diary notes is introduced; drafts stay in memory, server errors retain the current draft while the screen remains open. Original routine checkmarks stay in the account-scoped device document and are removed through the existing account-deletion cleanup. The migration adds RLS and cascading Auth deletion; the Worker additionally clears skincare_preferences and skin_diary_entries explicitly even with the feature switch off. Backups/provider logs and copies on other devices are not proven erased by a successful response. Live migration/deletion verification is pending approval.

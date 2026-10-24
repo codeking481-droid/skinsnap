@@ -3,6 +3,8 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { PROFILE_OPTIONS, type AnalysisPreferences } from '../analysisQuality';
 
 const LABELS: Record<string, string> = {
+  fragranceFree: 'Fragrance preference', prefer: 'Fragrance-free preferred', 'no-preference': 'No preference',
+  experience: 'Skincare experience', beginner: 'Beginner', experienced: 'Experienced',
   skinType: 'How would you describe your skin?', concern: 'What would you like help with?',
   sensitivity: 'Do products tend to bother your skin?', complexity: 'Routine preference', budget: 'Product budget',
   'not-sure': 'Not sure', dry: 'Dry', oily: 'Oily', combination: 'Combination', balanced: 'Balanced',
@@ -11,15 +13,15 @@ const LABELS: Record<string, string> = {
   yes: 'Yes', no: 'No', minimal: 'Essentials only', simple: 'Simple routine',
   'budget-friendly': 'Budget-friendly', flexible: 'Flexible',
 };
-export function AnalysisPreferencesForm({ value, onChange }: { value: AnalysisPreferences; onChange: (value: AnalysisPreferences) => void }) {
+export function AnalysisPreferencesForm({ value, onChange, extended = false }: { value: AnalysisPreferences; onChange: (value: AnalysisPreferences) => void; extended?: boolean }) {
   const [open, setOpen] = useState(false);
   return <View style={styles.card}>
     <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => setOpen(!open)} style={styles.toggle}>
       <Text style={styles.title}>Make your routine yours · Optional {open ? '−' : '+'}</Text>
     </Pressable>
     {open && <>
-      <Text style={styles.hint}>Your answers guide the routine, not the photo findings. Skip any question. Answers stay in this session and are sent with your analysis.</Text>
-      {(Object.keys(PROFILE_OPTIONS) as (keyof AnalysisPreferences)[]).map(key => <View key={key} style={styles.question}>
+      <Text style={styles.hint}>Your answers guide the routine, not the photo findings. Skip any question. Answers are sent with your analysis. Changes are remembered for later only when you explicitly save them in My Skin Preferences.</Text>
+      {(Object.keys(PROFILE_OPTIONS) as (keyof typeof PROFILE_OPTIONS)[]).filter(key => extended || !['fragranceFree', 'experience'].includes(key)).map(key => <View key={key} style={styles.question}>
         <Text style={styles.label}>{LABELS[key]}</Text>
         <View style={styles.options}>{PROFILE_OPTIONS[key].map(option => <Pressable key={option}
           accessibilityRole="checkbox" accessibilityState={{ checked: value[key] === option }}

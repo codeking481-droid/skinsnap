@@ -5,8 +5,10 @@ export const PROFILE_OPTIONS = {
   sensitivity: ['not-sure', 'yes', 'no'],
   complexity: ['minimal', 'simple'],
   budget: ['budget-friendly', 'flexible'],
+  fragranceFree: ['prefer', 'no-preference'],
+  experience: ['beginner', 'experienced'],
 } as const;
-export type AnalysisPreferences = { [K in keyof typeof PROFILE_OPTIONS]?: typeof PROFILE_OPTIONS[K][number] };
+export type AnalysisPreferences = { [K in keyof typeof PROFILE_OPTIONS]?: typeof PROFILE_OPTIONS[K][number] } & { region?: string; products?: string };
 export type ObservationEvidence = {
   title?: string;
   location?: string;
@@ -32,7 +34,13 @@ export function parseAnalysisPreferences(value: unknown): AnalysisPreferences {
   if (!record(value)) throw new Error('invalid-preferences');
   const result: Record<string, string> = {};
   for (const [key, entry] of Object.entries(value)) {
-    const allowed = PROFILE_OPTIONS[key as keyof AnalysisPreferences] as readonly string[] | undefined;
+    if (['region', 'products'].includes(key)) {
+      const max = key === 'region' ? 80 : 400;
+      if (typeof entry !== 'string' || entry.length > max || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(entry)) throw new Error('invalid-preferences');
+      if (entry.trim()) result[key] = entry.trim();
+      continue;
+    }
+    const allowed = PROFILE_OPTIONS[key as keyof typeof PROFILE_OPTIONS] as readonly string[] | undefined;
     if (!allowed || typeof entry !== 'string' || !allowed.includes(entry)) throw new Error('invalid-preferences');
     result[key] = entry;
   }

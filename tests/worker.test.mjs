@@ -1044,7 +1044,7 @@ test('account deletion targets only the Supabase-authenticated user', async () =
     assert.ok(requests.includes('https://supabase.test/auth/v1/admin/users/authenticated-user'));
     assert.ok(!requests.some((url) => url.includes('other-user')));
     const dataDeletes = requests.filter(url => url.includes('/rest/v1/'));
-    assert.equal(dataDeletes.length, 11);
+    assert.equal(dataDeletes.length, 13);
     for (const table of [
       'routine_progress',
       'skincare_routines',
@@ -1117,7 +1117,7 @@ test('repeating account deletion clears the same user-scoped records safely', as
       assert.equal(response.status, 200, await response.clone().text());
       assert.deepEqual(await response.json(), { deleted: true });
     }
-    assert.equal(deletes.length, 22);
+    assert.equal(deletes.length, 26);
     assert.ok(deletes.every(url => url.includes('eq.repeat-user')));
   } finally {
     globalThis.fetch = originalFetch;
@@ -1142,5 +1142,38 @@ test('partial data deletion failure stops before Auth removal and reports uncert
     assert.equal(result.error, 'account-deletion-incomplete');
     assert.match(result.message, /may already/);
     assert.ok(!requests.some(url => url.includes('/auth/v1/admin/users/')));
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+
+test('saved region, owned products, fragrance and experience personalize only the existing routine model', async () => {
+  const preferences = { sensitivity: 'yes', complexity: 'minimal', budget: 'budget-friendly', region: 'Nigeria', products: 'My moisturizer', fragranceFree: 'prefer', experience: 'beginner' };
+  const { response, requests } = await requestAnalysisWithOutputs({ imageQuality: 'clear', summary: 'Your cheeks look fairly smooth in this photo.', observations: [] }, {
+    morningRoutine: ['Apply sunscreen.'], eveningRoutine: ['Use a gentle moisturizer.'], precautions: ['Patch test new products.'],
+  }, { preferences });
+  assert.equal(response.status, 201);
+  const vision = requests.find(r => r.model === 'qwen/qwen3.8-27b');
+  const routine = requests.find(r => r.model === 'openai/gpt-oss-20b');
+  assert.ok(!JSON.stringify(vision.body).includes('Nigeria'));
+  assert.ok(!JSON.stringify(vision.body).includes('My moisturizer'));
+  assert.deepEqual(JSON.parse(routine.body.messages[1].content).selfReportedPreferences, preferences);
+});
+
+test('account deletion with retention enabled removes new private records before Auth', async () => {
+  const originalFetch = globalThis.fetch; const calls = [];
+  try {
+    globalThis.fetch = async (input, init = {}) => {
+      const url = String(input); calls.push({ url, method: init.method });
+      if (url.endsWith('/auth/v1/user')) return Response.json({ id: 'retention-owner' });
+      if (url.includes('/rest/v1/')) { assert.equal(new URL(url).searchParams.get('user_id') ?? new URL(url).searchParams.get('id'), 'eq.retention-owner'); return new Response(null, { status: 204 }); }
+      if (url.endsWith('/auth/v1/admin/users/retention-owner')) return new Response(null, { status: 200 });
+      throw Error('unexpected');
+    };
+    const response = await worker.fetch(new Request('https://skinsnap.test/v1/account?userId=someone-else', { method: 'DELETE', headers: { Authorization: 'Bearer test' } }), {
+      RETENTION_ENABLED: 'true', SUPABASE_URL: 'https://supabase.test', SUPABASE_PUBLISHABLE_KEY: 'test-key', SUPABASE_SECRET_KEY: 'test-secret',
+    });
+    assert.equal(response.status, 200);
+    for (const table of ['skin_diary_entries', 'skincare_preferences', 'routines']) assert.ok(calls.some(c => c.url.includes('/' + table + '?') && c.method === 'DELETE'));
+    assert.ok(calls.at(-1).url.includes('/auth/v1/admin/users/retention-owner'));
   } finally { globalThis.fetch = originalFetch; }
 });

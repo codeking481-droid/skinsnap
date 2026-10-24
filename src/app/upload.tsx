@@ -20,7 +20,9 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePhoto } from '../PhotoContext';
 import { backOrReplace } from '../navigation';
-import { validatePhoto } from '../photoValidation';
+import { inspectCapture } from '../services/captureQuality';
+import type { CaptureCheck } from '../smartCapture';
+import { loadSkinPreferences } from '../services/retentionApi';
 import { PHOTO_ANALYSIS_CONSENT_VERSION } from '../privacy';
 import { AnalysisPreferencesForm } from '../components/AnalysisPreferencesForm';
 
@@ -42,6 +44,8 @@ export default function UploadScreen() {
   const cameraPermission = refreshedPermission ?? permission;
   const [facing, setFacing] = useState<CameraType>('front');
   const [flash, setFlash] = useState<FlashMode>('off');
+  const [quality, setQuality] = useState<{ uri: string; check: CaptureCheck } | null>(null);
+  const [photoMime, setPhotoMime] = useState<string | undefined>();
   const [isCapturing, setIsCapturing] = useState(false);
   const [photoConsent, setPhotoConsent] = useState(photoUploadConsent);
   const [previewAspectRatio, setPreviewAspectRatio] = useState(0.76);
@@ -50,6 +54,19 @@ export default function UploadScreen() {
   const guideSize = Math.min(width - 96, 276) * (width < 380 ? 0.88 : 1);
   const previewWidth = Math.min(width - insets.left - insets.right - 40, 420);
   const previewHeight = Math.min(previewWidth / previewAspectRatio, Math.max(150, height * 0.38), 380);
+
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    void loadSkinPreferences().then(saved => { if (active && saved) setAnalysisPreferences(saved.preferences); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [setAnalysisPreferences]));
+  useEffect(() => {
+    if (!photoUri) return;
+    let active = true;
+    void inspectCapture(photoUri, photoMime).then(check => { if (active) setQuality({ uri: photoUri, check }); })
+      .catch(() => { if (active) setQuality({ uri: photoUri, check: { usable: false, warnings: [], message: 'The local photo check could not finish. Retake or choose another image.' } }); });
+    return () => { active = false; };
+  }, [photoMime, photoUri]);
 
   useEffect(() => {
     if (!photoUri) return;
@@ -90,21 +107,16 @@ export default function UploadScreen() {
 
   const validateSelectedPhoto = async (uri: string) => {
     try {
-      const { width: imageWidth, height: imageHeight } = await new Promise<{ width: number; height: number }>((resolve, reject) => {
-        Image.getSize(uri, (imageWidthValue, imageHeightValue) => resolve({ width: imageWidthValue, height: imageHeightValue }), reject);
-      });
-      if (!validatePhoto(imageWidth, imageHeight).valid) {
-        Alert.alert('Photo could not be checked', 'Choose an image that your device can open and preview.');
-        return;
-      }
-
+      if (!quality || quality.uri !== uri) { Alert.alert('Checking your photo', 'Wait for the local photo check to finish.'); return; }
+      if (!quality.check.usable) { Alert.alert('Choose another photo', quality.check.message); return; }
       if (!photoConsent) {
         Alert.alert('Consent needed', 'Please confirm that your photo may be securely processed when you request an authorized analysis.');
         return;
       }
 
-      setPhotoUploadConsent(true);
-      router.push('/paywall');
+      const proceed = () => { setPhotoUploadConsent(true); router.push('/paywall'); };
+      if (quality.check.warnings.length) Alert.alert('A retake may help', quality.check.message, [{ text: 'Retake', onPress: retakePhoto }, { text: 'Use this photo', onPress: proceed }]);
+      else proceed();
     } catch {
       Alert.alert('Photo could not be checked', 'Please select a different photo and try again.');
     }
@@ -119,6 +131,8 @@ export default function UploadScreen() {
         Alert.alert('Camera capture failed', 'Please try again or choose a photo from your gallery.');
         return;
       }
+      setPhotoMime('image/jpeg');
+      setQuality(null);
       setPhotoUri(photo.uri);
       setAnalysisResult(null);
       setPhotoUploadConsent(false);
@@ -139,6 +153,8 @@ export default function UploadScreen() {
       });
 
       if (result.canceled || !result.assets?.[0]?.uri) return;
+      setPhotoMime(result.assets[0].mimeType);
+      setQuality(null);
       setPhotoUri(result.assets[0].uri);
       setPhotoUploadConsent(false);
       setAnalysisResult(null);
@@ -239,9 +255,11 @@ export default function UploadScreen() {
 
           <View style={styles.previewTips}>
             <Text style={styles.tipsTitle}>Photo quality guide</Text>
-            <Text style={styles.tipsBody}>Use natural light and avoid filters.{ '\n' }This screen does not detect faces; choose a photo where your face is clearly visible.</Text>
+            <Text style={styles.tipsBody}>Face a window for soft, even light. Keep your phone steady, avoid strong shadows and heavy beauty filters.{ '\n' }This screen does not detect faces; choose a photo where your face is clearly visible.</Text>
           </View>
 
+          <View style={styles.previewTips}><Text accessibilityLiveRegion="polite" style={styles.tipsBody}>{quality?.uri === photoUri ? quality.check.message : 'Checking this file locally...'}</Text></View>
+          <Pressable accessibilityRole="button" onPress={() => router.push('/skin-preferences')} style={styles.secondaryButton}><Text style={styles.secondaryButtonText}>My Skin Preferences</Text></Pressable>
           <AnalysisPreferencesForm value={analysisPreferences} onChange={setAnalysisPreferences} />
           <Pressable
             accessibilityRole="checkbox"
@@ -261,7 +279,7 @@ export default function UploadScreen() {
           </View>
 
           <View style={styles.previewActions}>
-            <Pressable accessibilityRole="button" onPress={useSelectedPhoto} style={styles.primaryButton}>
+            <Pressable accessibilityRole="button" onPress={useSelectedPhoto} disabled={quality?.uri !== photoUri || !quality.check.usable} accessibilityState={{ disabled: quality?.uri !== photoUri || !quality.check.usable }} style={[styles.primaryButton, (quality?.uri !== photoUri || !quality.check.usable) && { opacity: 0.45 }]}>
               <LinearGradient colors={['#FFB2C9', '#FF6DA5', '#FF6C9D']} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={StyleSheet.absoluteFill} />
               <Text style={styles.primaryButtonText}>Use This Photo</Text>
             </Pressable>

@@ -47,3 +47,8 @@ SkinSnap transmits a selected photo, authentication data, analysis results, and 
 - Google's [User Data policy](https://support.google.com/googleplay/android-developer/answer/10144311?hl=en)
 - Google's [account deletion requirements](https://support.google.com/googleplay/android-developer/answer/13327111?hl=en)
 - Repository evidence: `src/services/analysisApi.ts`, `src/app/upload.tsx`, `src/services/authApi.ts`, `src/services/billing.ts`, `worker/src/index.ts`, `wrangler.jsonc`, and `supabase/migrations/`.
+
+
+## Retention candidate disclosure review - 2026-10-24
+
+Not deployed. Before publishing, add the opt-in saved preference profile, custom routine records and diary self-reports to the inventory. Diary feelings/notes may contain sensitive skincare-related information; the owner must review the applicable Health and fitness / Other personal information categories against actual use, not assume these are exempt because they are user-entered. Preferences used for routine generation reach Groq only with analysis consent. Diary notes and custom edits are not sent to Groq. All three record types have individual deletion controls plus account deletion and no configured automatic expiry. No diary photos, advertising SDK, notifications or analytics were added. New RLS policies require staging verification. Existing public contact, legal-age approval and final Data Safety review remain blocked.
