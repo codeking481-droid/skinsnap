@@ -18,8 +18,8 @@ const avatars = [
   require('../../assets/images/avatar-2.jpg'),
 ];
 const features: { icon: IconName; title: string; description: string }[] = [
-  { icon: 'scan', title: 'Skin insight previews', description: 'AI analysis is not configured in this demo.' },
-  { icon: 'leaf', title: 'Routine building', description: 'Build a routine from general skincare steps.' },
+  { icon: 'scan', title: 'Photo-based skin insights', description: 'A real analysis requires consent and verified premium access.' },
+  { icon: 'leaf', title: 'Routine building', description: 'Explore gentle skincare steps at your own pace.' },
   { icon: 'chart', title: 'Track your progress', description: 'Keep a personal record of your routine.' },
   { icon: 'people', title: 'Designed for all skin tones', description: 'An inclusive design, with no accuracy claims.' },
 ];
@@ -96,6 +96,16 @@ export default function WelcomeScreen() {
                 <Text style={[styles.replayLabel, { fontSize: 12 * scale, paddingVertical: 9 * scale }]}>Replay the introduction</Text>
               </Pressable>
             )}
+            <View style={styles.quickLinks}>
+              <Pressable accessibilityRole="button" onPress={() => router.push('/routine')} style={styles.quickLink}>
+                <Text style={styles.quickLinkTitle}>Your routine</Text>
+                <Text style={styles.quickLinkDetail}>Pick up where you left off</Text>
+              </Pressable>
+              <Pressable accessibilityRole="button" onPress={() => router.push('/progress')} style={styles.quickLink}>
+                <Text style={styles.quickLinkTitle}>Your progress</Text>
+                <Text style={styles.quickLinkDetail}>Checkmarks and saved analyses</Text>
+              </Pressable>
+            </View>
             <View style={[styles.community, { marginTop: 9 * scale, minHeight: 22 * scale, gap: 9 * scale }]}>
               <View style={styles.avatars} {...Platform.select({ web: { 'aria-hidden': true as const }, default: { accessibilityElementsHidden: true } })}>
                 {avatars.map((source, item) => <Image key={item} source={source} style={{ width: 22 * scale, height: 22 * scale, borderRadius: 11 * scale, borderColor: '#F6E8EF', borderWidth: 0.8, marginLeft: item ? -6 * scale : 0 }} />)}
@@ -128,6 +138,10 @@ const styles = StyleSheet.create({
   community: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
   replayButton: { alignSelf: 'center', minHeight: 40, justifyContent: 'center' },
   replayLabel: { color: '#E5B9C8', fontFamily: 'InterMedium', textDecorationLine: 'underline' },
+  quickLinks: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
+  quickLink: { flexGrow: 1, flexBasis: 140, minHeight: 68, padding: 13, borderRadius: 15, borderWidth: 1, borderColor: '#694257', backgroundColor: '#21131E', justifyContent: 'center' },
+  quickLinkTitle: { color: '#FF9CBC', fontFamily: 'InterSemibold', fontSize: 14 },
+  quickLinkDetail: { color: '#D6CDD7', fontFamily: 'InterRegular', fontSize: 11, lineHeight: 16, marginTop: 4 },
   avatars: { flexDirection: 'row', alignItems: 'center' },
   communityText: { color: '#B9B6C0', fontFamily: 'InterRegular' },
 });

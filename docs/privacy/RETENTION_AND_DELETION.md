@@ -1,41 +1,36 @@
-# Retention and deletion
+# Retention and deletion notes
 
-**Last reviewed:** 2026-10-22
+**Reviewed:** 23 October 2026
+**Status:** Repository-source review only. Live project configuration, backups, and provider retention remain unverified.
+
+For the complete flow and evidence limits, see [`data-flow-audit.md`](./data-flow-audit.md).
 
 ## Current implementation
 
-| Data | Current location | Current retention/deletion behavior |
+| Data | Location | Behavior supported by source |
 |---|---|---|
-| Source selfie/photo | User-selected URI on device; source ownership varies between camera cache and gallery provider | Not proactively deleted by SkinSnap. Gallery originals are never deleted. OS/app cache lifecycle is not controlled by SkinSnap. |
-| Normalized JPEG upload copy | Expo temporary/cache file | Created for request preparation; now removed in request `finally`. Failure is surfaced. Abrupt process termination can prevent cleanup; OS cache policy is outside app control. |
-| In-flight uploaded image | Cloudflare Worker request memory; sent inline to Gemini | Worker source does not persist raw bytes to Supabase or use Gemini's file upload API. Provider and platform processing/telemetry remain subject to their terms. |
-| Analysis result | Supabase `analysis_jobs.result`; structured rows in `skin_analyses` and `skincare_routines` | No user-facing single-result/history deletion is implemented. Retained until account deletion or a database retention policy is applied. No expiration period is configured in the inspected source. |
-| Routine completion state | Local app document file, optionally named with authenticated account UUID | Persists until app data removal or the new account-deletion cleanup runs. Guest state is not account-scoped. |
-| Auth access/refresh tokens | Platform secure storage through `expo-secure-store` | Cleared on sign-out/account deletion when local cleanup succeeds. |
-| Worker invocation/log metadata | Cloudflare Workers observability | Observability is enabled; configured retention period and whether request metadata contains source IP/device details were not inspected. |
-| Provider input/output records | Google Gemini and Groq systems | Controlled by provider terms/settings; SkinSnap cannot delete provider-side records from the app. See `THIRD_PARTY_PROCESSORS.md`. |
+| Selected original photo | User device/gallery or camera/picker cache | SkinSnap does not delete the selected original. Operating-system cache behavior is outside the app's control. |
+| Prepared JPEG | App temporary/cache file | Created for an analysis request; the app attempts cleanup when the request finishes or fails. Process termination and file-system failure can prevent cleanup. |
+| In-flight photo | Cloudflare Worker request memory and Groq vision request | The Worker source does not intentionally persist the raw upload in Supabase or object storage. Provider-side processing/retention and live storage inventory are unverified. |
+| Completed result | Supabase analysis job and structured analysis/routine tables | No automatic expiration or individual result deletion is implemented in inspected source. |
+| Failed analysis | Supabase job status and attempt metadata | A failed request may leave a failed record and consume an attempt. The raw photo is not intentionally stored with it. |
+| Routine completion | Local app-document JSON and account progress records | In-app deletion attempts to remove the current account-scoped local file and known server-side rows. Other devices are unaffected. |
+| Authentication token | Expo SecureStore | Sign-out/account deletion attempts to clear the token. Device storage failure is reported. |
+| Worker logs | Cloudflare observability | Safe custom stage logs are visible in source. Cloudflare request metadata, retention, and log access settings are unverified. |
+| Provider content/logs | Groq, Supabase, Cloudflare, RevenueCat/Google Play as configured | SkinSnap has no provider-side deletion API integration. Provider retention and account settings require owner verification. |
 
-## Account deletion behavior
+## Account deletion behavior and recovery
 
-The in-app route is Progress → Account & data settings → Delete account and data. It obtains the authenticated identity from the Worker, calls authenticated `DELETE /v1/account`, and the Worker deletes the authenticated Supabase Auth user using its server-side credential. The app then removes account-scoped routine progress and clears local tokens.
+In-app deletion requires a valid authenticated session. The Worker derives the user ID from Supabase Auth and deletes the known user-scoped tables before requesting Auth-user deletion. If a row deletion fails, it stops before deleting the Auth user. If Auth deletion fails after database cleanup, the user can sign in and retry; repeated scoped deletes are safe. This is a sequence of API operations, not a cross-service transaction, so a failed request may mean some records have already been removed.
 
-The Worker does not accept a client-selected user ID for deletion. Cross-user authorization is covered by a Worker test. The live schema's deletion cascade constraints were not captured by the available schema summary; therefore, associated database-row deletion is **not yet verified**. Provider deletion is also not performed by the app. The success message must not be interpreted as proof of third-party deletion.
+After confirmed server deletion, the app attempts local progress cleanup and token removal. A local cleanup failure is surfaced separately. The public web deletion form is intentionally disabled in the review build; configuring, deploying, and testing it is a release blocker.
 
-No automated, publicly accessible external deletion-request channel is configured. The website draft identifies this as a launch blocker rather than discarding user requests.
+The current live table definitions, constraints, storage bucket contents, and any records outside the repository's known table list have not been verified. Do not promise that all historical rows or provider-held copies are deleted until a live metadata review and disposable-account verification pass.
 
-## Required retention decisions before release
+## Release checks
 
-1. Define and disclose retention duration for completed analysis results.
-2. Decide whether users can delete individual results or only delete the entire account.
-3. Verify all live `auth.users` foreign keys and `ON DELETE` actions for `analysis_jobs`, `skin_analyses`, `skincare_routines`, `routine_progress`, `offer_eligibility`, `subscription_entitlements`, and `profiles`.
-4. Test deletion with a disposable account, verify no owned rows remain, and test idempotent retry/partial failure.
-5. Inspect Cloudflare log retention and Google/Groq project settings.
-6. Supply the actual legal operator identity and support/privacy contact.
-7. Define a working out-of-app account deletion request mechanism.
-
-## Claims SkinSnap must not make
-
-- "Photos are deleted everywhere immediately."
-- "AI providers never retain photos or observations."
-- "Account deletion removes all records and third-party copies" before cascade, provider, and disposable-user verification.
-- Any fixed retention period until it is configured and validated.
+1. Confirm live schema and table list, including `routine_progress`, `offer_eligibility`, and `subscription_entitlements`, which are referenced by deletion code but not defined in the inspected migrations.
+2. Inspect all user-linked foreign keys, storage buckets/objects, and backup policies.
+3. Test valid, unauthorized, repeated, and controlled partial-failure deletion with a disposable account only.
+4. Verify provider retention settings, current legal obligations, and the public contact.
+5. Enable and deploy external deletion only after the hosted flow passes the disposable-account test.

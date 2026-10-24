@@ -1,4 +1,4 @@
-import { getSessionToken } from './session';
+import { ensureAuthenticatedSession, getSessionToken, sessionFailureMessage } from './session';
 
 function apiUrl(): string | null {
   const value = process.env.EXPO_PUBLIC_API_URL?.trim();
@@ -6,8 +6,10 @@ function apiUrl(): string | null {
 }
 
 export async function getRoutineProgressOwner(): Promise<string | null> {
+  const session = await ensureAuthenticatedSession();
+  if (!session.valid) throw new Error(sessionFailureMessage(session));
   const token = await getSessionToken();
-  if (!token) return null;
+  if (!token) throw new Error('Your secure session could not be read for routine progress.');
   const baseUrl = apiUrl();
   if (!baseUrl) throw new Error('Your account could not be verified for routine progress.');
   const response = await fetch(`${baseUrl}/v1/session`, {

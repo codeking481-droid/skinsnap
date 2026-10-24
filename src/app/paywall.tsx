@@ -35,7 +35,7 @@ import {
   dismissDownsellClaim,
   getActiveDownsellClaim,
 } from '../services/offerEligibility';
-import { verifyAuthenticatedSession } from '../services/session';
+import { ensureAuthenticatedSession, sessionFailureMessage, verifyAuthenticatedSession, type SessionFailureReason } from '../services/session';
 import {
   getPaywallPrice,
   SUBSCRIPTION_PURCHASES_ENABLED,
@@ -71,7 +71,7 @@ export default function PaywallScreen() {
   const [billingState, setBillingState] = useState<BillingState | null>(null);
   const [downsellReady, setDownsellReady] = useState(false);
   const [hasSession, setHasSession] = useState(false);
-  const [sessionReason, setSessionReason] = useState<string | null>(null);
+  const [sessionReason, setSessionReason] = useState<SessionFailureReason | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [closeMessage, setCloseMessage] = useState<string | null>(null);
@@ -82,7 +82,7 @@ export default function PaywallScreen() {
     let active = true;
     Promise.all([
       loadBillingState(downsell),
-      verifyAuthenticatedSession(),
+      SUBSCRIPTION_PURCHASES_ENABLED ? ensureAuthenticatedSession() : verifyAuthenticatedSession(),
       downsell ? getActiveDownsellClaim() : Promise.resolve(null),
     ]).then(([state, session, claim]) => {
       if (!active) return;
@@ -231,9 +231,9 @@ export default function PaywallScreen() {
     } else if (status.reason === 'inactive') {
       setNotice('No active SkinSnap subscription was found for this Google Play account.');
     } else if (status.reason === 'preview') {
-      setNotice('Restore Purchases is available only in an Android development or store build.');
+      setNotice(__DEV__ ? 'Restore Purchases is available only in an Android development or store build.' : 'Purchases could not be restored in this build. No purchase state was changed.');
     } else if (status.reason === 'unconfigured') {
-      setNotice('RevenueCat is not configured for this build. No purchase state was changed.');
+      setNotice(__DEV__ ? 'RevenueCat is not configured for this build. No purchase state was changed.' : 'Subscriptions are not available yet. No purchase state was changed.');
     } else {
       setNotice('Could not verify purchases. Check your connection and try again.');
     }
@@ -247,7 +247,7 @@ export default function PaywallScreen() {
         router.push('/privacy');
         return;
       }
-      setNotice(`${kind === 'terms' ? 'Terms of Service' : 'Privacy Policy'} URL is not configured. Purchases must remain disabled until the required legal URL is published.`);
+        router.push('/terms');
       return;
     }
     try {
@@ -350,18 +350,16 @@ export default function PaywallScreen() {
             No free trial or introductory price. {selected === 'weekly' ? 'Billed weekly' : 'Billed annually'} and automatically renews until cancelled. Cancel in Google Play subscriptions.
           </Text>
           {!canPurchase && <Text style={[styles.status, { fontSize: 9.5 * scale, lineHeight: 14 * scale, marginTop: 5 * scale }]}>
-            {billingState?.kind === 'expo-go-preview'
+            {__DEV__ && billingState?.kind === 'expo-go-preview'
               ? 'Development-only Expo Go billing preview · purchases and premium access are disabled.'
+              : !SUBSCRIPTION_PURCHASES_ENABLED
+                ? 'Purchases and paid analysis are disabled in this build. You can continue with free skincare tools; no charge or analysis request will occur.'
               : !storeReady
-                ? billingState?.message ?? 'Loading Google Play subscription details…'
+                ? __DEV__ ? billingState?.message ?? 'Loading Google Play subscription details…' : 'Subscriptions are not available yet. No purchase has been made.'
                 : !hasSession
-                    ? sessionReason === 'expired'
-                      ? 'Your sign-in needs refreshing before a purchase can be made.'
-                      : sessionReason === 'identity-mismatch'
-                        ? 'Your signed-in account does not match the RevenueCat customer. Purchases are disabled.'
-                        : sessionReason === 'backend-unavailable'
-                          ? 'The authenticated account service is unavailable.'
-                          : 'Purchases are disabled until authenticated sign-in is configured.'
+                    ? sessionReason
+                      ? sessionFailureMessage({ valid: false, reason: sessionReason })
+                      : 'A secure guest identity is required before a purchase. No email sign-up is needed.'
                 : !legalConfigured
                   ? 'Purchases are disabled until secure HTTPS Terms and Privacy URLs are configured.'
                 : !hasSecureBackend()

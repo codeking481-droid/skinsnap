@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Animated, BackHandler, Image, Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Alert, Animated, BackHandler, Image, Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import Svg, { Path, Circle } from 'react-native-svg';
@@ -8,6 +8,7 @@ import { GlowButton } from '../components/GlowButton';
 import { LaunchSplash } from '../components/LaunchSplash';
 import { loadPreferences, markOnboardingComplete, saveOnboardingStep } from '../preferences';
 import { getOnboardingResumeStep } from '../flowLogic';
+import { MINIMUM_USER_AGE } from '../privacy';
 
 const portrait = require('../../assets/images/welcome-portrait.png');
 const inclusivity = require('../../assets/images/skin-tone-strip.png');
@@ -71,6 +72,7 @@ function PhotoCards({ scale, showFour = false }: { scale: number; showFour?: boo
 export default function OnboardingScreen() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [ready, setReady] = useState(false);
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
   const [transitionDirection, setTransitionDirection] = useState<1 | -1>(1);
   const [legalInfo, setLegalInfo] = useState<'Terms of Service' | 'Privacy Policy' | null>(null);
@@ -84,8 +86,11 @@ export default function OnboardingScreen() {
     let active = true;
     loadPreferences().then((preferences) => {
       if (!active) return;
-      if (preferences.onboardingComplete) {
+      setAgeConfirmed(preferences.ageConfirmed);
+      if (preferences.onboardingComplete && preferences.ageConfirmed) {
         setStep(1);
+      } else if (preferences.onboardingComplete) {
+        setStep(3);
       } else {
         setStep(getOnboardingResumeStep(preferences.onboardingStep));
       }
@@ -100,9 +105,12 @@ export default function OnboardingScreen() {
       if (step > 1) {
         const previousStep = (step - 1) as 1 | 2;
         setTransitioning(true);
-        void saveOnboardingStep(previousStep).finally(() => {
+        void saveOnboardingStep(previousStep).then(() => {
           setTransitionDirection(-1);
           setStep(previousStep);
+        }).catch(() => {
+          setTransitioning(false);
+          Alert.alert('Could not save your progress', 'Please check your device storage and try again.');
         });
         return true;
       }
@@ -134,23 +142,37 @@ export default function OnboardingScreen() {
   }, [contentOffset, contentOpacity, ready, step, transitionDirection]);
   const goNext = async () => {
     if (transitioning) return;
-    setTransitioning(true);
-    if (step < 3) {
-      const nextStep = (step + 1) as 2 | 3;
-      await saveOnboardingStep(nextStep);
-      setTransitionDirection(1);
-      setStep(nextStep);
+    if (step === 3 && !ageConfirmed) {
+      Alert.alert(`${MINIMUM_USER_AGE}+ age requirement`, `SkinSnap is available only to people aged ${MINIMUM_USER_AGE} or older.`);
       return;
     }
-    await markOnboardingComplete();
-    router.replace('/upload');
+    setTransitioning(true);
+    try {
+      if (step < 3) {
+        const nextStep = (step + 1) as 2 | 3;
+        await saveOnboardingStep(nextStep);
+        setTransitionDirection(1);
+        setStep(nextStep);
+        return;
+      }
+      await markOnboardingComplete(ageConfirmed);
+      router.replace('/upload');
+    } catch {
+      setTransitioning(false);
+      Alert.alert('Could not save your progress', 'Please check your device storage and try again.');
+    }
   };
   const skipToPrivacy = async () => {
     if (transitioning || step === 3) return;
     setTransitioning(true);
-    await saveOnboardingStep(3);
-    setTransitionDirection(1);
-    setStep(3);
+    try {
+      await saveOnboardingStep(3);
+      setTransitionDirection(1);
+      setStep(3);
+    } catch {
+      setTransitioning(false);
+      Alert.alert('Could not save your progress', 'Please check your device storage and try again.');
+    }
   };
 
   if (!ready) return <LaunchSplash />;
@@ -171,16 +193,16 @@ export default function OnboardingScreen() {
               </View>
               <PhotoCards scale={scale} />
               <View style={[styles.featureCards, { gap: 8 * scale, marginTop: 4 * scale }]}>
-                <FeatureCard icon="scan" title="Explore sample insights" detail="AI analysis is not configured in this demo." scale={scale} />
-                <FeatureCard icon="leaf" title="Get personalised routines" detail="Skincare plans made just for you." scale={scale} />
-                <FeatureCard icon="chart" title="Track your progress" detail="Keep a personal record of your routine." scale={scale} />
+                <FeatureCard icon="scan" title="Photo-based insights" detail="Real results require your consent and verified premium access." scale={scale} />
+                <FeatureCard icon="leaf" title="Build a gentle routine" detail="Personalised guidance follows a completed analysis." scale={scale} />
+                <FeatureCard icon="chart" title="Track your progress" detail="Routine completion can be tracked on this device." scale={scale} />
               </View>
             </>
           ) : step === 2 ? (
             <>
               <View style={[styles.titleCenter, { marginTop: 34 * scale }]}>
                 <Text style={[styles.heading, styles.center, { fontSize: 39 * scale, lineHeight: 38 * scale, letterSpacing: -1.3 * scale }]}>Designed with{'\n'}every <Text style={styles.accent}>skin tone.</Text></Text>
-                <Text style={[styles.subtitle, styles.center, { fontSize: 17 * scale, lineHeight: 21 * scale, marginTop: 8 * scale }]}>An inclusive visual experience.{ '\n' }No skin analysis is available in this demo.</Text>
+                <Text style={[styles.subtitle, styles.center, { fontSize: 17 * scale, lineHeight: 21 * scale, marginTop: 8 * scale }]}>Choose your own skincare goals.{ '\n' }SkinSnap does not infer identity from a face.</Text>
               </View>
               <PhotoCards scale={scale} showFour />
               <View style={[styles.concerns, { marginTop: 13 * scale }]}>
@@ -201,7 +223,7 @@ export default function OnboardingScreen() {
               <View style={[styles.privacyCards, { gap: 9 * scale }]}>
                 <PrivacyCard icon="lock" title="Your choice comes first" detail="The preview keeps your selected photo on this device." scale={scale} />
                 <PrivacyCard icon="trash" title="Photo handling" detail="A prepared copy is removed after processing when cleanup succeeds. Provider retention follows provider terms." scale={scale} />
-                <PrivacyCard icon="shield" title="Clear processing choices" detail="Gemini receives the photo. Groq receives text observations only. Analysis results may be saved to your account." scale={scale} />
+                <PrivacyCard icon="shield" title="Clear processing choices" detail="Groq receives the photo for visual observations and text for routine guidance. Analysis results may be saved to your account." scale={scale} />
               </View>
             </View>
           )}
@@ -209,6 +231,20 @@ export default function OnboardingScreen() {
           <View style={{ flex: 1, minHeight: 13 * scale }} />
           {step === 3 ? (
             <>
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: ageConfirmed }}
+                accessibilityLabel={`I confirm that I am ${MINIMUM_USER_AGE} years of age or older`}
+                onPress={() => setAgeConfirmed((confirmed) => !confirmed)}
+                style={[styles.ageConfirmation, { marginBottom: 12 * scale }]}
+              >
+                <View style={[styles.ageCheckbox, ageConfirmed && styles.ageCheckboxSelected]}>
+                  {ageConfirmed && <Text style={styles.ageCheckmark}>✓</Text>}
+                </View>
+                <Text style={[styles.ageConfirmationText, { fontSize: 12 * scale, lineHeight: 18 * scale }]}>
+                  I confirm that I am {MINIMUM_USER_AGE} years of age or older.
+                </Text>
+              </Pressable>
               <GlowButton scale={scale} label="Continue" accessibilityLabel="Continue to photo selection" onPress={goNext} />
               <View style={[styles.legal, { marginTop: 13 * scale }]}>
                 <Text style={[styles.legalIntro, { fontSize: 10 * scale }]}>By continuing, you agree to our</Text>
@@ -238,13 +274,14 @@ export default function OnboardingScreen() {
             <Text style={styles.modalEyebrow}>SKINSNAP</Text>
             <Text style={styles.modalTitle}>{legalInfo}</Text>
             <Text style={styles.modalCopy}>{legalInfo === 'Privacy Policy'
-              ? 'SkinSnap sends a consented photo to its secure service and Google Gemini for cosmetic observations. Groq receives text observations only. Structured results may be saved to your account. Provider retention depends on the configured service and its terms.'
-              : 'Terms of Service are not configured yet. Subscription purchases remain disabled until the required legal URL is published.'}</Text>
+              ? 'With your consent, SkinSnap sends your photo to its secure service and Groq for cosmetic observations. Groq then receives text observations and any optional preferences to prepare a routine. Structured results are saved to your account. Provider retention follows its terms and account settings.'
+              : 'Terms of Service are a review draft and are not yet effective. Subscription terms and legal notices require review before publication.'}</Text>
             {legalInfo === 'Privacy Policy' && (
               <Pressable accessibilityRole="link" onPress={() => { setLegalInfo(null); router.push('/privacy'); }}>
                 <Text style={styles.legalLink}>Read privacy information</Text>
               </Pressable>
             )}
+              {legalInfo === 'Terms of Service' && <Pressable accessibilityRole="link" onPress={() => { setLegalInfo(null); router.push('/terms'); }}><Text style={styles.legalLink}>Read service information</Text></Pressable>}
             <Pressable accessibilityRole="button" onPress={() => setLegalInfo(null)} style={styles.modalButton}><Text style={styles.modalButtonText}>Close</Text></Pressable>
           </View>
         </View>
@@ -324,6 +361,11 @@ const styles = StyleSheet.create({
   privacyCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(13,13,18,0.79)', borderColor: 'rgba(109,80,95,0.3)', borderWidth: 0.8 },
   privacyIcon: { justifyContent: 'center', alignItems: 'center', borderWidth: 0.8, borderColor: '#A42E54' },
   legal: { alignItems: 'center', paddingBottom: 7 },
+  ageConfirmation: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 38 },
+  ageCheckbox: { width: 22, height: 22, borderRadius: 5, borderWidth: 1, borderColor: '#9F778B', alignItems: 'center', justifyContent: 'center' },
+  ageCheckboxSelected: { backgroundColor: '#FF8FB2', borderColor: '#FF8FB2' },
+  ageCheckmark: { color: '#12070C', fontFamily: 'InterExtraBold', fontSize: 15, lineHeight: 19 },
+  ageConfirmationText: { color: '#E7DCE4', fontFamily: 'InterRegular', flex: 1 },
   skipButton: { alignSelf: 'center', minHeight: 44, justifyContent: 'center' },
   skipText: { color: '#C7C4CE', fontFamily: 'InterMedium', textDecorationLine: 'underline' },
   legalIntro: { color: '#BFC1CC', fontFamily: 'InterRegular' },

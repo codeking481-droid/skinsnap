@@ -1,5 +1,6 @@
 import { File, Paths } from 'expo-file-system';
 import { sanitizeRoutineProgress } from './flowLogic';
+import { localDayKey, restoreCheckedSteps } from './routineProgressState';
 
 export type RoutineProgress = {
   checkedSteps: string[];
@@ -13,19 +14,21 @@ function routineFile(scope?: string) {
   return new File(Paths.document, safeScope ? `${STORAGE_KEY}-${safeScope}.json` : `${STORAGE_KEY}.json`);
 }
 
-export async function loadRoutineProgress(scope?: string): Promise<RoutineProgress> {
+export async function loadRoutineProgress(scope?: string, routineId?: string): Promise<RoutineProgress> {
   try {
     const file = routineFile(scope);
     const raw = file.exists ? await file.text() : null;
     if (!raw) return EMPTY;
-    return sanitizeRoutineProgress(JSON.parse(raw));
+    const data = JSON.parse(raw);
+    const progress = sanitizeRoutineProgress(data);
+    return { ...progress, checkedSteps: restoreCheckedSteps(progress.checkedSteps, data.checkedOn, localDayKey(), data.routineId, routineId) };
   } catch {
     return EMPTY;
   }
 }
 
-export async function saveRoutineProgress(progress: RoutineProgress, scope?: string): Promise<void> {
-  const raw = JSON.stringify(progress);
+export async function saveRoutineProgress(progress: RoutineProgress, scope?: string, routineId?: string): Promise<void> {
+  const raw = JSON.stringify({ ...progress, checkedOn: localDayKey(), routineId });
   const file = routineFile(scope);
   if (!file.exists) file.create({ intermediates: true });
   await file.write(raw, { encoding: 'utf8' });

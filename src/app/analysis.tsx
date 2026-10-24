@@ -7,10 +7,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CinematicSkinScanner } from '../components/CinematicSkinScanner';
 import { usePhoto } from '../PhotoContext';
 import { backOrReplace } from '../navigation';
-import { AnalysisRequestError, requestSkinAnalysis } from '../services/analysisApi';
+import { AnalysisRequestError, requestSkinAnalysis, type SkinAnalysisResult } from '../services/analysisApi';
+import { developmentAnalysisEnabled } from '../releasePolicy';
 
 const requestKey = () => `analysis-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const developmentTestMode = process.env.EXPO_PUBLIC_AI_DEV_TEST_MODE === 'true';
+const developmentTestMode = developmentAnalysisEnabled(__DEV__, process.env.EXPO_PUBLIC_AI_DEV_TEST_MODE);
 
 function stageLabel(stage: string | null): string {
   switch (stage) {
@@ -37,7 +38,9 @@ export default function AnalysisScreen() {
     photoUri,
     photoUploadConsent,
     setPhotoUri,
-    setAnalysisResult,
+    acceptAnalysisResult,
+    analysisPreferences,
+    analysisRequestKey,
   } = usePhoto();
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -47,7 +50,8 @@ export default function AnalysisScreen() {
   const started = useRef(false);
   const inFlight = useRef(false);
   const active = useRef(true);
-  const idempotencyKey = useRef(requestKey());
+  const completedOutcome = useRef<{ result: SkinAnalysisResult } | { code: string; stage: string; message: string } | null>(null);
+  const idempotencyKey = useRef(analysisRequestKey ?? requestKey());
   const scale = Math.max(0.9, Math.min(Math.min(width, 520) / 393, 1.08));
   const ringSize = Math.min(width - 96 * scale, 286 * scale);
   const photo = photoUri && !photoUnavailable ? { uri: photoUri } : null;
@@ -59,6 +63,7 @@ export default function AnalysisScreen() {
     setErrorMessage(null);
     setErrorCode(null);
     setErrorStage(null);
+    completedOutcome.current = null;
     try {
       if (!photoUri || photoUnavailable) {
         throw new AnalysisRequestError('photo-unavailable', 'Choose a photo again before requesting analysis.');
@@ -68,13 +73,19 @@ export default function AnalysisScreen() {
         photoUploadConsent,
         idempotencyKey.current,
         developmentTestMode ? 'development' : 'premium',
+        analysisPreferences,
       );
+      completedOutcome.current = { result };
       if (!active.current) return;
-      setAnalysisResult(result);
+      if (!acceptAnalysisResult(idempotencyKey.current, result)) return;
       router.replace('/results');
     } catch (error) {
-      if (!active.current) return;
       const code = error instanceof AnalysisRequestError ? error.code : 'network-error';
+      completedOutcome.current = {
+        code, stage: error instanceof AnalysisRequestError ? error.stage ?? 'upload' : 'upload',
+        message: error instanceof Error ? error.message : 'Analysis could not be completed.',
+      };
+      if (!active.current) return;
       setErrorCode(code);
       setErrorStage(error instanceof AnalysisRequestError ? error.stage : 'upload');
       setErrorMessage(error instanceof Error ? error.message : 'Analysis could not be completed.');
@@ -82,16 +93,27 @@ export default function AnalysisScreen() {
       inFlight.current = false;
       if (active.current) setBusy(false);
     }
-  }, [photoUnavailable, photoUploadConsent, photoUri, setAnalysisResult]);
+  }, [acceptAnalysisResult, analysisPreferences, photoUnavailable, photoUploadConsent, photoUri]);
 
   useFocusEffect(useCallback(() => {
     active.current = true;
+    const completed = completedOutcome.current;
+    if (completed) {
+      setBusy(false);
+      if ('result' in completed) {
+        router.replace(acceptAnalysisResult(idempotencyKey.current, completed.result) ? '/results' : '/upload');
+      } else {
+        setErrorCode(completed.code);
+        setErrorStage(completed.stage);
+        setErrorMessage(completed.message);
+      }
+    }
     if (!started.current) {
       started.current = true;
       void runAnalysis();
     }
     return () => { active.current = false; };
-  }, [runAnalysis]));
+  }, [acceptAnalysisResult, runAnalysis]));
 
   const retry = () => {
     if (inFlight.current) return;
@@ -132,7 +154,7 @@ export default function AnalysisScreen() {
           <Text style={[styles.subtitle, { fontSize: 12.5 * scale, lineHeight: 18 * scale, marginTop: 7 * scale }]}>
             {busy
               ? developmentTestMode
-                ? 'Development-only test: authorized accounts are subject to server-side limits. Admin testing has a finite rolling 30-day safety cap; no purchase is made.'
+                ? 'Development-only test: the server-authorized admin account has no monthly analysis cap; other test accounts remain limited. AI usage may incur provider costs. No purchase is made.'
                 : 'Verifying your subscription and requesting analysis from the secure service. No sample results are shown.'
               : errorMessage && errorCode === 'photo-unavailable'
                 ? `Photo preparation failed · ${stageLabel(errorStage)}. No photo was uploaded and no AI request was sent. ${errorMessage}`

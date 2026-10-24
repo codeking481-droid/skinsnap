@@ -3,7 +3,7 @@ import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, useWindowDimen
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { PRIVACY_POLICY_DRAFT_URL } from '../privacy';
+import { MINIMUM_USER_AGE, PUBLISHED_PRIVACY_POLICY_URL } from '../privacy';
 
 export default function PrivacyScreen() {
   const { width, height } = useWindowDimensions();
@@ -13,13 +13,13 @@ export default function PrivacyScreen() {
 
   const openPolicy = async () => {
     if (busy) return;
-    if (!PRIVACY_POLICY_DRAFT_URL || !PRIVACY_POLICY_DRAFT_URL.startsWith('https://')) {
+    if (!PUBLISHED_PRIVACY_POLICY_URL) {
       Alert.alert('Public policy unavailable', 'SkinSnap does not yet have a verified, published Privacy Policy URL.');
       return;
     }
     setBusy(true);
     try {
-      await Linking.openURL(PRIVACY_POLICY_DRAFT_URL);
+      await Linking.openURL(PUBLISHED_PRIVACY_POLICY_URL);
     } catch {
       Alert.alert('Could not open policy', 'The public Privacy Policy could not be opened right now.');
     } finally {
@@ -40,27 +40,31 @@ export default function PrivacyScreen() {
           <Text style={styles.lead}>A plain-language summary of how the current app handles your photo and account data.</Text>
 
           <Section title="Photo processing">
-            <Text style={styles.copy}>Only submit a photo after you give explicit consent. SkinSnap prepares a JPEG copy on your device and sends it over HTTPS to the authenticated SkinSnap service. The service sends the image to Groq for cosmetic visual observations. The current Worker code does not save the raw image to Supabase; it holds and processes the upload in request memory.</Text>
+            <Text style={styles.copy}>Only submit a photo after you give explicit consent. SkinSnap prepares a JPEG copy on your device and sends it over HTTPS to the authenticated SkinSnap service. The service sends the image to Groq for cosmetic visual observations and does not intentionally save the raw image to Supabase. Provider-side handling and retention are governed by provider settings and terms, which SkinSnap has not verified for its account.</Text>
             <Text style={styles.copy}>SkinSnap attempts to remove its prepared JPEG file after the request ends. If cleanup fails, the app reports that error. A camera or gallery source file is not deleted by SkinSnap, and the operating system may retain temporary source files in its app or media storage.</Text>
           </Section>
 
           <Section title="AI providers and results">
             <Text style={styles.copy}>Groq receives the image for visual observations, then text observations and any optional routine preferences to generate general morning and evening skincare guidance. Preferences stay in the app session; SkinSnap saves the generated results, not a separate preference profile. Lighting, camera quality, and filters can affect observations. Results are cosmetic information only, not a diagnosis or medical advice.</Text>
-            <Text style={styles.copy}>SkinSnap saves structured analysis results for account history and routine screens. Provider-side logs, review, and retention are controlled by each provider’s terms and account settings; SkinSnap cannot delete provider-held copies through this app.</Text>
+            <Text style={styles.copy}>SkinSnap saves structured analysis results for account history and routine screens. Failed jobs may leave a status and attempt record, but do not store the uploaded image in the app database. Provider-side logs, review, and retention are controlled by each provider’s terms and account settings; SkinSnap cannot delete provider-held copies through this app.</Text>
           </Section>
 
           <Section title="Local and account data">
-            <Text style={styles.copy}>Routine completion progress is stored in an app document on this device, optionally scoped to the signed-in account. Sign-in tokens are kept in the platform secure store. Account deletion is available from Progress → Account &amp; data settings. It requests deletion of the authenticated Supabase account and its configured dependent records, then removes account-scoped routine progress from this device.</Text>
-            <Text style={styles.copy}>The live database’s complete foreign-key deletion behavior and provider-side deletion cannot be verified from this app screen. Do not interpret a successful account response as proof that third-party copies were erased.</Text>
+            <Text style={styles.copy}>You can explore SkinSnap without an email account. A secure guest profile is created only when an account-backed feature needs it. Guest history is tied to the secure profile saved on this installation; email recovery is not enabled, so clearing app data or reinstalling may make that history inaccessible. Routine completion is also kept in an app document on this device. Sign-in tokens are kept in platform secure storage.</Text>
+            <Text style={styles.copy}>Account deletion is available from Progress → Account &amp; data settings. It requests removal of the known SkinSnap server records and authenticated Supabase account, then removes account-scoped routine progress from this device.</Text>
+            <Text style={styles.copy}>The live database schema and provider-side deletion cannot be verified from this app screen. A deletion error may mean some records were already removed; sign in again and retry. Do not interpret a successful account response as proof that third-party copies or local files on other devices were erased.</Text>
           </Section>
 
           <Section title="Your choices and support">
             <Text style={styles.copy}>You may decline photo consent, choose another photo, or leave without requesting analysis. To withdraw consent before upload, untick the consent box or leave the photo screen. Consent is held only in app memory for the selected photo and is requested again for a new photo or app session.</Text>
-            <Text style={styles.copy}>A public operator contact and external deletion-request URL have not yet been configured. Those details must be supplied before SkinSnap is released publicly.</Text>
+            <Text style={styles.copy}>SkinSnap is for people aged {MINIMUM_USER_AGE} and older. The app asks for an age confirmation and does not ask for your date of birth. A public operator contact and external deletion-request service still need to be configured before release.</Text>
           </Section>
 
-          <Pressable accessibilityRole="link" disabled={busy} onPress={() => void openPolicy()} style={styles.linkButton}>
+          {PUBLISHED_PRIVACY_POLICY_URL && <Pressable accessibilityRole="link" disabled={busy} onPress={() => void openPolicy()} style={styles.linkButton}>
             <Text style={styles.linkText}>{busy ? 'Opening…' : 'Open published Privacy Policy'}</Text>
+          </Pressable>}
+          <Pressable accessibilityRole="link" onPress={() => router.push('/terms')} style={styles.linkButton}>
+            <Text style={styles.linkText}>Terms and service information</Text>
           </Pressable>
           <Pressable accessibilityRole="button" onPress={() => router.push('/sign-in')} style={styles.secondaryButton}>
             <Text style={styles.secondaryText}>Account &amp; data settings</Text>

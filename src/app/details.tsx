@@ -13,6 +13,9 @@ const CATEGORY_LABELS: Record<string, string> = {
   'uneven-looking-tone': 'Uneven-looking tone',
   'visible-blemishes': 'Visible blemishes',
   'general-texture': 'General texture',
+  'natural-pores': 'Natural pores',
+  'color-variation': 'Colour variation',
+  'overall-finish': 'Overall finish',
 };
 
 export default function DetailsScreen() {
@@ -36,10 +39,12 @@ export default function DetailsScreen() {
           {analysisResult.observations.map((item, index) => <View key={`${item.category}-${index}`} style={[styles.card, { borderRadius: 17 * scale, padding: 15 * scale }]}>
             <View style={styles.cardHeading}>
               <Text style={[styles.cardTitle, { fontSize: 14 * scale }]}>{item.title ?? CATEGORY_LABELS[item.category]}</Text>
-              <Text style={[styles.confidence, { fontSize: 9 * scale }]}>{visibilityLabel(item)}</Text>
+              {visibilityLabel(item) && <Text style={[styles.confidence, { fontSize: 9 * scale }]}>{visibilityLabel(item)}</Text>}
             </View>
             <Text style={[styles.description, { fontSize: 11.5 * scale, lineHeight: 17 * scale, marginTop: 6 * scale }]}>{item.observation}</Text>
             {item.location && <Text style={[styles.description, { fontSize: 11 * scale, lineHeight: 17 * scale, marginTop: 8 * scale }]}>Visible area: {item.location}</Text>}
+            {item.whyItMatters && <Text style={[styles.description, { fontSize: 11 * scale, lineHeight: 17 * scale, marginTop: 8 * scale }]}>Why it may matter: {item.whyItMatters}</Text>}
+            {item.practicalSuggestion && <Text style={[styles.description, { fontSize: 11 * scale, lineHeight: 17 * scale, marginTop: 8 * scale }]}>A gentle next step: {item.practicalSuggestion}</Text>}
             {item.limitation && <Text style={[styles.disclaimer, { fontSize: 11 * scale, lineHeight: 17 * scale, marginTop: 5 * scale }]}>Keep in mind: {item.limitation}</Text>}
           </View>)}
         </View>

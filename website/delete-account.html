@@ -1,34 +1,55 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#08070c">
-    <title>Account Deletion | SkinSnap</title>
-    <link rel="stylesheet" href="./styles.css">
-  </head>
-  <body>
-    <header class="site-header">
-      <a class="brand" href="./index.html">Skin<span>Snap</span></a>
-      <nav aria-label="Main navigation"><a href="./privacy.html">Privacy</a><a href="./delete-account.html">Delete account</a><a href="./support.html">Support</a></nav>
-    </header>
-    <main class="document">
-      <p class="eyebrow">DRAFT — EXTERNAL REQUESTS NOT ENABLED</p>
-      <h1>Delete your <span>account</span></h1>
-      <p class="notice"><strong>This page is not yet a functioning external deletion-request resource.</strong> A verified support/privacy contact or secure ownership-verification flow is required before deployment. Do not publish it as the Play Console deletion URL yet.</p>
-      <h2>In-app deletion</h2>
-      <ol>
-        <li>Open SkinSnap and go to Progress.</li>
-        <li>Choose <strong>Account &amp; data settings</strong>.</li>
-        <li>Sign in if requested, then choose <strong>Delete account and data</strong>.</li>
-        <li>Review the confirmation and confirm only if you understand the action is permanent.</li>
-      </ol>
-      <p>The app sends an authenticated deletion request for the currently signed-in Supabase Auth account and attempts to remove account-scoped local routine progress. The live database's complete dependent-row deletion behavior must still be tested with a disposable account. Provider-side data deletion is not performed by the app.</p>
-      <h2>Request deletion without the app</h2>
-      <p>[A functioning email or web request channel with secure account-ownership verification is required here. No support contact has been supplied, so this draft cannot accept or route requests.]</p>
-      <h2>Retention exceptions</h2>
-      <p>Any legally required or security-related retention exceptions, data categories, and time periods must be defined and added by the operator before publication.</p>
-    </main>
-    <footer>Draft only · SkinSnap / Alphatekx · <a href="./privacy.html">Privacy Policy</a></footer>
-  </body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Delete your account · SkinSnap</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="./index.html">Skin<span>Snap</span></a>
+    <nav aria-label="Legal navigation">
+      <a href="./privacy">Privacy</a><a href="./terms">Terms</a>
+      <a href="./delete-account">Delete account</a><a href="./support.html">Support</a>
+    </nav>
+  </header>
+  <main id="main" class="document">
+    <p class="eyebrow">ALPHATEKX · SKINSNAP</p>
+    <h1>Your account. <span>Your choice.</span></h1>
+    <aside class="notice">
+      <strong>Review draft — external deletion is not connected or published.</strong>
+      <p>Do not enter a password here until this page is published with approved configuration and the deletion flow has been tested.</p>
+    </aside>
+    <p class="lede">You can request deletion in the app under Progress → Account &amp; data settings → Delete account. The web request form will be enabled only after the secure service and public contact are verified.</p>
+
+    <h2>What an account deletion request does</h2>
+    <p>The authenticated service removes the known SkinSnap account records and requests deletion of the matching Supabase sign-in account. The request does not accept a user ID from the browser. If a step fails, some records may already have been removed; where the account still exists, sign in again and retry.</p>
+    <p>Deletion cannot erase original photos in your gallery, app files on other devices, or data held by AI, hosting, authentication, payment, or backup providers under their own retention rules. In-app deletion attempts to remove account-scoped routine progress from the current device. Account deletion does not cancel a Google Play subscription; <a href="https://play.google.com/store/account/subscriptions">manage that separately in Google Play</a>.</p>
+
+    <form id="delete-form" method="post" action="./delete-account" autocomplete="on">
+      <label for="email">SkinSnap account email</label>
+      <input id="email" name="email" type="email" autocomplete="username" required>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <label for="confirmation">Type DELETE to confirm</label>
+      <input id="confirmation" name="confirmation" autocomplete="off" pattern="DELETE" required>
+      <label class="check-label">
+        <input type="checkbox" name="acknowledged" value="yes" required>
+        <span>I understand that this is irreversible and does not cancel a store subscription or remove provider-held copies.</span>
+      </label>
+      <button type="submit" disabled>Delete my SkinSnap account</button>
+    </form>
+    <p id="delete-status" role="status" aria-live="polite">External deletion is disabled in this review copy. Use the in-app deletion option.</p>
+    <noscript><p>JavaScript is required for secure external account verification. Use the in-app deletion option until the web flow is published.</p></noscript>
+
+    <h2>Before public release</h2>
+    <p>The site owner must supply the verified public support/privacy contact, configure the public Supabase client and approved Worker origin, complete an end-to-end test with a disposable account, and approve publication. There is no unmonitored request queue or promised processing deadline.</p>
+    <p><a href="./privacy">Read the Privacy Policy draft</a> · <a href="./terms">Read the Terms draft</a></p>
+  </main>
+  <footer>SkinSnap · Operated under the Alphatekx brand, Nigeria · Review draft, not effective</footer>
+  <script type="module" src="./deletion.mjs"></script>
+</body>
 </html>

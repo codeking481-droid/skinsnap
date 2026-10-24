@@ -1,3 +1,5 @@
+import { parseAnalysisPreferences, VISION_PROMPT, type AnalysisPreferences } from '../../src/analysisQuality.ts';
+
 interface Env {
   SUPABASE_URL?: string;
   SUPABASE_PUBLISHABLE_KEY?: string;
@@ -10,7 +12,6 @@ interface Env {
   AI_DEV_TEST_ENABLED?: string;
   AI_DEV_TEST_USER_ID?: string;
   AI_ADMIN_TEST_USER_ID?: string;
-  AI_ADMIN_TEST_MONTHLY_LIMIT?: string;
   ALLOWED_ORIGINS?: string;
 }
 
@@ -20,9 +21,16 @@ type AuthenticatedUser = {
 };
 
 type SkinObservation = {
-  category: 'visible-shine' | 'apparent-dryness' | 'uneven-looking-tone' | 'visible-blemishes' | 'general-texture';
+  category: 'visible-shine' | 'apparent-dryness' | 'uneven-looking-tone' | 'visible-blemishes' | 'general-texture'
+    | 'natural-pores' | 'color-variation' | 'overall-finish';
   observation: string;
   confidence: 'low' | 'moderate' | 'high';
+  title: string;
+  location: string;
+  visibility: 'clearly-visible' | 'possibly-visible';
+  limitation: string;
+  whyItMatters?: string;
+  practicalSuggestion?: string;
 };
 
 type AnalysisResult = {
@@ -52,8 +60,7 @@ class ApiError extends Error {
 const MAX_ANALYSIS_PHOTO_BYTES = 12 * 1024 * 1024;
 const MONTHLY_ANALYSIS_LIMIT = 20;
 const DEV_ANALYSIS_LIMIT = 2;
-const DEFAULT_ADMIN_TEST_LIMIT = 20;
-const MAX_ADMIN_TEST_LIMIT = 100;
+const UNLIMITED_ADMIN_TEST_LIMIT = 2_147_483_647;
 const GROQ_VISION_MODEL = 'qwen/qwen3.8-27b';
 const MAX_VISION_ATTEMPTS = 2;
 const MAX_VISION_RATE_LIMIT_WAIT_MS = 10_000;
@@ -64,6 +71,9 @@ const OBSERVATION_CATEGORIES = new Set([
   'uneven-looking-tone',
   'visible-blemishes',
   'general-texture',
+  'natural-pores',
+  'color-variation',
+  'overall-finish',
 ]);
 const RESTRICTED_COSMETIC_LANGUAGE = /\b(diagnos(?:e|is|ed|ing)?|treat(?:ment|s|ed|ing)?|cure[ds]?|prescri(?:be|ption)|eczema|acne|rosacea|infection|skin cancer|medical[- ]grade|antibiotic|steroid|medication|beauty score|attractiveness|guaranteed results?)\b/i;
 
@@ -259,7 +269,9 @@ function base64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-type SkinObservations = Pick<AnalysisResult, 'imageQuality' | 'summary' | 'observations'>;
+type SkinObservations = Pick<AnalysisResult, 'imageQuality' | 'summary' | 'observations'> & {
+  analysisUsable: boolean;
+};
 type RoutineGuidance = Pick<AnalysisResult, 'morningRoutine' | 'eveningRoutine' | 'precautions'>;
 
 function parseModelResult(text: string): SkinObservations {
@@ -270,13 +282,15 @@ function parseModelResult(text: string): SkinObservations {
     throw new ApiError(502, 'vision-invalid-response', 'The vision provider returned an unreadable response.');
   }
   if (!isRecord(value)
+    || typeof value.analysisUsable !== 'boolean'
     || typeof value.summary !== 'string'
     || value.summary.trim().length === 0
     || !isSafeCosmeticText(value.summary)
     || value.summary.length > 800
     || !['clear', 'limited'].includes(String(value.imageQuality))
     || !Array.isArray(value.observations)
-    || value.observations.length > 12) {
+    || value.observations.length > 7
+    || (value.analysisUsable === false && (value.imageQuality !== 'limited' || value.observations.length !== 0))) {
     throw new ApiError(502, 'vision-invalid-response', 'The vision provider returned an unsupported response.');
   }
   const observations: SkinObservation[] = value.observations.map((item) => {
@@ -287,16 +301,33 @@ function parseModelResult(text: string): SkinObservations {
       || !item.observation.trim()
       || !isSafeCosmeticText(item.observation)
       || item.observation.length > 400
-      || !['low', 'moderate', 'high'].includes(String(item.confidence))) {
+      || !['low', 'moderate', 'high'].includes(String(item.confidence))
+      || typeof item.title !== 'string' || !item.title.trim() || item.title.length > 70 || !isSafeCosmeticText(item.title)
+      || typeof item.location !== 'string' || !item.location.trim() || item.location.length > 100 || !isSafeCosmeticText(item.location)
+      || !['clearly-visible', 'possibly-visible'].includes(String(item.visibility))
+      || typeof item.limitation !== 'string' || !item.limitation.trim() || item.limitation.length > 240 || !isSafeCosmeticText(item.limitation)
+      || (item.whyItMatters !== undefined && (typeof item.whyItMatters !== 'string' || !item.whyItMatters.trim() || item.whyItMatters.length > 240 || !isSafeCosmeticText(item.whyItMatters)))
+      || (item.practicalSuggestion !== undefined && (typeof item.practicalSuggestion !== 'string' || !item.practicalSuggestion.trim() || item.practicalSuggestion.length > 240 || !isSafeCosmeticText(item.practicalSuggestion)))) {
       throw new ApiError(502, 'vision-invalid-response', 'The vision provider returned an unsupported observation.');
     }
     return {
       category: item.category as SkinObservation['category'],
       observation: item.observation,
       confidence: item.confidence as SkinObservation['confidence'],
+      title: item.title,
+      location: item.location,
+      visibility: item.visibility as SkinObservation['visibility'],
+      limitation: item.limitation,
+      ...(item.whyItMatters !== undefined ? { whyItMatters: item.whyItMatters } : {}),
+      ...(item.practicalSuggestion !== undefined ? { practicalSuggestion: item.practicalSuggestion } : {}),
     };
   });
-  return { imageQuality: value.imageQuality as SkinObservations['imageQuality'], summary: value.summary, observations };
+  return {
+    analysisUsable: value.analysisUsable,
+    imageQuality: value.imageQuality as SkinObservations['imageQuality'],
+    summary: value.summary,
+    observations,
+  };
 }
 
 async function analyzeWithGroqVision(env: Env, file: File, requestId: string): Promise<SkinObservations> {
@@ -319,7 +350,7 @@ async function analyzeWithGroqVision(env: Env, file: File, requestId: string): P
             content: [
               {
                 type: 'text',
-                text: 'Provide cautious, non-diagnostic observations of visible skin features only. Do not identify the person or infer age, ethnicity, gender, health conditions, or any protected or sensitive trait. Do not diagnose or recommend medical treatment. Lighting, filters, and camera quality can affect observations. Return one JSON object with imageQuality (clear or limited), summary (string), and observations (array of {category, observation, confidence}). Categories may only be visible-shine, apparent-dryness, uneven-looking-tone, visible-blemishes, general-texture. Confidence must be low, moderate, or high. If the face or skin is not clearly visible, set imageQuality to limited, explain why in the summary, and return no observations.',
+                text: VISION_PROMPT,
               },
               {
                 type: 'image_url',
@@ -406,7 +437,12 @@ function parseRoutineResult(text: string): RoutineGuidance {
   return result;
 }
 
-async function generateRoutineWithGroq(env: Env, observations: SkinObservations, requestId: string): Promise<RoutineGuidance> {
+async function generateRoutineWithGroq(
+  env: Env,
+  observations: Pick<AnalysisResult, 'imageQuality' | 'summary' | 'observations'>,
+  requestId: string,
+  preferences: AnalysisPreferences = {},
+): Promise<RoutineGuidance> {
   const apiKey = required(env.GROQ_API_KEY, 'Groq');
   logAnalysisProgress(requestId, 'groq-started');
   let response: Response;
@@ -419,8 +455,8 @@ async function generateRoutineWithGroq(env: Env, observations: SkinObservations,
         temperature: 0.2,
         max_completion_tokens: 1800,
         messages: [
-          { role: 'system', content: 'Create cautious general cosmetic skincare guidance from the provided non-diagnostic visible observations only. Do not infer identity or protected traits; do not diagnose, treat disease, prescribe, promise results, or recommend brands. Give simple morning and evening routines, avoid strong actives or combinations unless observations support cautious general use, include sunscreen guidance in the morning, and list patch testing or professional-care precautions when appropriate. If image quality is limited, explain that recommendations are general and not tailored. Return only values matching the requested JSON schema.' },
-          { role: 'user', content: JSON.stringify(observations) },
+          { role: 'system', content: 'Write a short, practical cosmetic skincare routine in friendly everyday English. Use only validated photo observations and optional self-reported preferences; distinguish self-report from visible findings. Explain briefly why each step may help and how to use it. Prefer two or three morning steps and two evening steps, essentials only for minimal complexity. Morning: gentle cleansing if appropriate, moisturizer and broad-spectrum SPF 30+ sunscreen used as directed on the label, reapplied at least every two hours outdoors and after swimming/sweating. Evening: gentle cleansing and moisturizer. Choose simple affordable product categories for a budget preference; no invented brands or prices. Mention glycerin, ceramides or hyaluronic acid only where helpful. If sensitivity is yes, unknown or omitted, prefer fragrance-free basics and avoid exfoliating acids/retinoids. Do not add strong actives just because of visual guesses; no prescriptions, medical terms, diagnoses, disease advice, skin-health judgments, attractiveness, bleaching or guaranteed outcomes. Do not invent exact doses, application durations or product shelf lives; follow labels. Add concise patch-testing, one-at-a-time introduction and professional-care advice for persistent concerns. A user concern that is not visible must never be described as a finding. Limited photos support only general advice. Each routine string must stay within 240 characters. Return only the existing JSON schema.' },
+          { role: 'user', content: JSON.stringify({ observations, selfReportedPreferences: preferences }) },
         ],
         response_format: {
           type: 'json_schema',
@@ -488,16 +524,6 @@ async function reserveAnalysis(
   throw new ApiError(503, 'analysis-reservation-failed', 'Could not reserve an analysis request safely.');
 }
 
-function adminTestLimit(env: Env): number {
-  const configured = env.AI_ADMIN_TEST_MONTHLY_LIMIT?.trim();
-  if (!configured) return DEFAULT_ADMIN_TEST_LIMIT;
-  const limit = Number(configured);
-  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_ADMIN_TEST_LIMIT) {
-    throw new ApiError(503, 'admin-test-limit-misconfigured', 'The administrator test safety cap is not configured correctly.');
-  }
-  return limit;
-}
-
 async function updateAnalysis(env: Env, userId: string, idempotencyKey: string, result: AnalysisResult): Promise<void> {
   await databaseRequest(env, 'rpc/complete_skinsnap_analysis', {
     method: 'POST',
@@ -552,6 +578,12 @@ async function handleAnalysis(
     throw new ApiError(413, 'photo-too-large', 'The prepared image is too large. Choose a smaller image or retake the photo.');
   }
   required(env.GROQ_API_KEY, 'Groq');
+  let preferences: AnalysisPreferences;
+  try {
+    const raw = request.headers.get('X-SkinSnap-Preferences') ?? '{}';
+    if (raw.length > 512) throw new Error('invalid-preferences');
+    preferences = parseAnalysisPreferences(JSON.parse(raw));
+  } catch { throw new ApiError(400, 'invalid-preferences', 'Choose one of the available routine preferences.'); }
   const form = await request.formData();
   const file = form.get('photo');
   if (!(file instanceof File) || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
@@ -566,7 +598,7 @@ async function handleAnalysis(
     user.id,
     idempotencyKey,
     mode === 'development'
-      ? adminTestAccount ? adminTestLimit(env) : DEV_ANALYSIS_LIMIT
+      ? adminTestAccount ? UNLIMITED_ADMIN_TEST_LIMIT : DEV_ANALYSIS_LIMIT
       : MONTHLY_ANALYSIS_LIMIT,
   );
   if (reservation === 'limited') {
@@ -585,8 +617,16 @@ async function handleAnalysis(
   }
   logAnalysisProgress(requestId, 'quota-reserved');
   try {
-    const observations = await analyzeWithGroqVision(env, file, requestId);
-    const routine = await generateRoutineWithGroq(env, observations, requestId);
+    const visionResult = await analyzeWithGroqVision(env, file, requestId);
+    if (!visionResult.analysisUsable) {
+      throw new ApiError(422, 'photo-not-suitable', visionResult.summary);
+    }
+    const observations: Pick<AnalysisResult, 'imageQuality' | 'summary' | 'observations'> = {
+      imageQuality: visionResult.imageQuality,
+      summary: visionResult.summary,
+      observations: visionResult.observations,
+    };
+    const routine = await generateRoutineWithGroq(env, observations, requestId, preferences);
     const result: AnalysisResult = {
       ...observations,
       ...routine,
@@ -671,6 +711,28 @@ async function saveUserRecord(request: Request, env: Env, table: 'routines' | 'p
 }
 
 async function deleteAccount(env: Env, userId: string): Promise<Response> {
+  // Remove known account-scoped records before Auth deletion so a failed step is retryable.
+  const tables = [
+    'routine_progress',
+    'skincare_routines',
+    'skin_analyses',
+    'analysis_jobs',
+    'analysis_history',
+    'downsell_offer_claims',
+    'offer_eligibility',
+    'subscription_entitlements',
+    'routines',
+    'progress_snapshots',
+    'profiles',
+  ] as const;
+  for (const table of tables) {
+    const query = new URLSearchParams({ [table === 'profiles' ? 'id' : 'user_id']: `eq.${userId}` });
+    try {
+      await databaseRequest(env, `${table}?${query}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
+    } catch {
+      throw new ApiError(503, 'account-deletion-incomplete', 'Some account data may already have been removed. Sign in and retry deletion to finish.');
+    }
+  }
   const key = supabaseSecretKey(env);
   let response: Response;
   try {
@@ -679,10 +741,10 @@ async function deleteAccount(env: Env, userId: string): Promise<Response> {
       headers: { apikey: key, Authorization: `Bearer ${key}` },
     });
   } catch {
-    throw new ApiError(503, 'account-deletion-unavailable', 'Account deletion is temporarily unavailable. Please retry.');
+    throw new ApiError(503, 'account-deletion-unavailable', 'Account data was cleared, but sign-in deletion could not be confirmed. Please retry deletion.');
   }
   if (!response.ok) {
-    throw new ApiError(503, 'account-deletion-unavailable', 'Account deletion could not be completed. Please retry.');
+    throw new ApiError(503, 'account-deletion-unavailable', 'Account data was cleared, but sign-in deletion could not be completed. Please retry deletion.');
   }
   return json({ deleted: true });
 }
@@ -765,7 +827,7 @@ function applyCors(request: Request, env: Env, response: Response): Response {
   const headers = new Headers(response.headers);
   headers.set('Access-Control-Allow-Origin', origin);
   headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, Idempotency-Key');
+  headers.set('Access-Control-Allow-Headers', 'Authorization, apikey, Content-Type, Idempotency-Key, X-SkinSnap-Preferences');
   headers.set('Access-Control-Expose-Headers', 'Retry-After');
   headers.set('Access-Control-Max-Age', '86400');
   headers.append('Vary', 'Origin');
@@ -784,7 +846,7 @@ async function route(request: Request, env: Env): Promise<Response> {
       status: 204,
       headers: {
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers': 'Authorization, Content-Type, Idempotency-Key',
+        'Access-Control-Allow-Headers': 'Authorization, apikey, Content-Type, Idempotency-Key',
         'Access-Control-Max-Age': '86400',
         ...(origin ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {}),
       },

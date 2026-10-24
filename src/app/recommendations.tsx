@@ -42,9 +42,9 @@ export default function RecommendationsScreen() {
         <View style={[styles.disclaimer, { borderRadius: 16 * scale, padding: 13 * scale, marginTop: 15 * scale }]}>
           <Text style={[styles.disclaimerText, { fontSize: 10 * scale, lineHeight: 15 * scale }]}>These are non-medical suggestions. SkinSnap cannot diagnose or treat skin conditions. Ask a qualified professional about persistent or concerning symptoms.</Text>
         </View>
-      </> : <Text style={[styles.empty, { fontSize: 13 * scale, lineHeight: 20 * scale, marginTop: 28 * scale }]}>No paid analysis is available in this session. Personalised suggestions are not generated from sample data.</Text>}
+      </> : <Text style={[styles.empty, { fontSize: 13 * scale, lineHeight: 20 * scale, marginTop: 28 * scale }]}>Your suggestions will appear after a successful skin analysis. You can open your saved routine below.</Text>}
       <Pressable accessibilityRole="button" onPress={() => router.push('/routine')} style={[styles.cta, { minHeight: 53 * scale, borderRadius: 28 * scale, marginTop: 17 * scale }]}><LinearGradient colors={['#FF6494', '#FF6794', '#FF6B99']} style={styles.ctaFill}><Text style={[styles.ctaText, { fontSize: 16 * scale }]}>Open my routine tracker</Text><Svg width={21 * scale} height={21 * scale} viewBox="0 0 24 24" fill="none" stroke="#08090D" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><Path d="M4 12h15m-6-6 6 6-6 6" /></Svg></LinearGradient></Pressable>
-      <Text style={[styles.demoNotice, { fontSize: 8.5 * scale, marginTop: 7 * scale }]}>Routine tracker is free; analysis-based suggestions require a completed paid analysis.</Text>
+      <Text style={[styles.demoNotice, { fontSize: 8.5 * scale, marginTop: 7 * scale }]}>Your tracker uses guidance from your saved analysis. Introduce new products gradually.</Text>
     </View>
   </ScrollView></View>;
 }

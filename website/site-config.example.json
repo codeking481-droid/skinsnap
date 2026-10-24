@@ -1,0 +1,12 @@
+{
+  "operatorBrand": "Alphatekx",
+  "country": "Nigeria",
+  "supportEmail": null,
+  "minimumAge": 18,
+  "agePolicyApproved": true,
+  "legalPublicationApproved": false,
+  "deletionEnabled": false,
+  "apiUrl": "https://skinsnap.risewithalphatekx.workers.dev",
+  "supabaseUrl": "",
+  "publishableKey": ""
+}

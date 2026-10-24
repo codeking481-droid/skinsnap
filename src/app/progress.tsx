@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { loadRoutineProgress, type RoutineProgress } from '../routineStorage';
@@ -16,7 +16,8 @@ const EMPTY_PROGRESS: RoutineProgress = { checkedSteps: [], completedDays: [] };
 export default function ProgressScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const { setAnalysisResult } = usePhoto();
+  const { setAnalysisResult, setPhotoUri, setPhotoUploadConsent } = usePhoto();
+  const historyGeneration = useRef(0);
   const [progress, setProgress] = useState(EMPTY_PROGRESS);
   const [history, setHistory] = useState<AnalysisHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -25,38 +26,47 @@ export default function ProgressScreen() {
   const scale = Math.max(0.9, Math.min(Math.min(width, 520) / 393, 1.08));
 
   const refreshHistory = useCallback(async () => {
+    const generation = ++historyGeneration.current;
+    setHistory([]);
     setHistoryLoading(true);
     setHistoryError(null);
     try {
-      setHistory(await loadAnalysisHistory());
+      const items = await loadAnalysisHistory();
+      if (generation !== historyGeneration.current) return;
+      setHistory(items);
     } catch (error) {
+      if (generation !== historyGeneration.current) return;
       setHistoryError(error instanceof AuthApiError ? error.message : 'Analysis history is unavailable right now.');
     } finally {
-      setHistoryLoading(false);
+      if (generation === historyGeneration.current) setHistoryLoading(false);
     }
   }, []);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     let active = true;
+    setProgress(EMPTY_PROGRESS);
     const historyRequest = setTimeout(() => { void refreshHistory(); }, 0);
     void (async () => {
+      let owner: string | null = null;
+      let sessionMessage: string | null = null;
       try {
-        const owner = await getRoutineProgressOwner();
-        const value = await loadRoutineProgress(owner ?? undefined);
-        if (!active) return;
-        setProgress(value);
-        setProgressMessage(owner
-          ? 'Completion history is saved on this device for your signed-in account.'
-          : 'Completion history is saved on this device.');
+        owner = await getRoutineProgressOwner();
       } catch (error) {
-        if (active) setProgressMessage(error instanceof Error ? error.message : 'Routine progress could not be loaded.');
+        sessionMessage = error instanceof Error ? error.message : 'Secure account history is unavailable.';
       }
+      const value = await loadRoutineProgress(owner ?? undefined);
+      if (!active) return;
+      setProgress(value);
+      setProgressMessage(owner
+        ? 'Completion history is saved on this device for your SkinSnap guest or account profile.'
+        : `${sessionMessage ?? 'Secure account history is unavailable.'} Routine completion remains saved on this device.`);
     })();
     return () => {
       active = false;
+      historyGeneration.current += 1;
       clearTimeout(historyRequest);
     };
-  }, [refreshHistory]);
+  }, [refreshHistory]));
 
   const today = new Date();
   const monday = new Date(today);
@@ -110,12 +120,14 @@ export default function ProgressScreen() {
             </>
             : history.length === 0
               ? <Text style={[styles.copy, { fontSize: 11.5 * scale, lineHeight: 17 * scale, marginTop: 6 * scale }]}>
-                No saved analyses yet. Results appear here only after a verified subscription and a successful secure analysis.
+                No saved analyses yet. Your successful saved analyses appear here.
               </Text>
               : <View style={{ marginTop: 8 * scale, gap: 9 * scale }}>
                 {history.map((item) => (
                   <Pressable key={item.resultId} accessibilityRole="button" onPress={() => {
                     setAnalysisResult(item);
+                    setPhotoUri(null);
+                    setPhotoUploadConsent(false);
                     router.push('/results');
                   }} style={[styles.historyItem, { borderRadius: 13 * scale, padding: 12 * scale }]}>
                     <Text style={[styles.historyDate, { fontSize: 10 * scale }]}>{new Date(item.createdAt).toLocaleDateString()}</Text>
@@ -125,7 +137,7 @@ export default function ProgressScreen() {
                 ))}
               </View>}
         <Pressable accessibilityRole="button" onPress={() => router.push('/upload')} style={[styles.secondaryButton, { minHeight: 44 * scale, borderRadius: 23 * scale, marginTop: 13 * scale }]}>
-          <Text style={[styles.secondaryText, { fontSize: 12 * scale }]}>Start a paid analysis</Text>
+          <Text style={[styles.secondaryText, { fontSize: 12 * scale }]}>Start a photo analysis</Text>
         </Pressable>
       </View>
 

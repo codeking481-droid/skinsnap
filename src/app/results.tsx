@@ -12,6 +12,9 @@ const CATEGORY_LABELS: Record<string, string> = {
   'uneven-looking-tone': 'Uneven-looking tone',
   'visible-blemishes': 'Visible blemishes',
   'general-texture': 'General texture',
+  'natural-pores': 'Natural pores',
+  'color-variation': 'Colour variation',
+  'overall-finish': 'Overall finish',
 };
 
 export default function ResultsScreen() {
@@ -32,24 +35,32 @@ export default function ResultsScreen() {
 
           {analysisResult ? (
             <>
-              <Text style={[styles.heading, { fontSize: 29 * scale, lineHeight: 36 * scale, marginTop: 7 * scale }]}>Your Skin<Text style={styles.pink}> Insights</Text></Text>
-              <Text style={[styles.subheading, { fontSize: 10 * scale, marginTop: 5 * scale }]}>VISIBLE FEATURES · GENTLE GUIDANCE</Text>
+              <Text style={[styles.heading, { fontSize: 29 * scale, lineHeight: 36 * scale, marginTop: 7 * scale }]}>Your Glow<Text style={styles.pink}> Snapshot</Text></Text>
+              <Text style={[styles.subheading, { fontSize: 10 * scale, marginTop: 5 * scale }]}>A PHOTO-BASED COSMETIC OVERVIEW</Text>
               <View style={[styles.summary, { borderRadius: 19 * scale, padding: 17 * scale, marginTop: 16 * scale }]}>
                 {photoUri && <Image source={{ uri: photoUri }} style={[styles.photo, { width: 66 * scale, height: 66 * scale, borderRadius: 34 * scale }]} resizeMode="cover" accessible accessibilityLabel="Photo used for this requested analysis" />}
-                <Text style={[styles.summaryTitle, { fontSize: 15 * scale, marginTop: photoUri ? 11 * scale : 0 }]}>Overview</Text>
+                <Text style={[styles.summaryTitle, { fontSize: 15 * scale, marginTop: photoUri ? 11 * scale : 0 }]}>Your overall look</Text>
                 <Text style={[styles.body, { fontSize: 13 * scale, lineHeight: 19 * scale, marginTop: 5 * scale }]}>{analysisResult.summary}</Text>
+                {analysisResult.observations.length > 0 && <View style={{ marginTop: 13 * scale, gap: 7 * scale }}>
+                  {analysisResult.observations.slice(0, 3).map((item, index) => <View key={`${item.category}-${index}`} style={[styles.highlight, { borderRadius: 12 * scale, padding: 10 * scale }]}>
+                    <Text style={[styles.summaryTitle, { fontSize: 11 * scale }]}>{item.title ?? CATEGORY_LABELS[item.category]}</Text>
+                    <Text style={[styles.body, { fontSize: 11 * scale, lineHeight: 16 * scale, marginTop: 3 * scale }]}>{item.observation}</Text>
+                    {item.location && <Text style={[styles.timestamp, { fontSize: 9 * scale, marginTop: 4 * scale }]}>Visible area: {item.location}</Text>}
+                  </View>)}
+                </View>}
+                <Text style={[styles.timestamp, { fontSize: 9.5 * scale, lineHeight: 14 * scale, marginTop: 11 * scale }]}>This describes what is visible in this photo, not your skin’s health or attractiveness. No beauty or medical score is used.</Text>
                 <Text style={[styles.timestamp, { fontSize: 9 * scale, marginTop: 10 * scale }]}>Completed {new Date(analysisResult.createdAt).toLocaleString()}</Text>
               </View>
               {analysisResult.imageQuality === 'limited' && <View style={[styles.qualityNotice, { borderRadius: 14 * scale, padding: 12 * scale, marginTop: 10 * scale }]}>
-                <Text style={[styles.qualityText, { fontSize: 11 * scale, lineHeight: 16 * scale }]}>Image quality was limited. These observations may miss details; try a clear, front-facing photo in even light for a more useful review.</Text>
+                <Text style={[styles.qualityText, { fontSize: 11 * scale, lineHeight: 16 * scale }]}>{analysisResult.imageAssessment?.guidance ?? 'Photo detail was limited, so this review may miss features. A steady, well-lit photo can provide more detail next time.'}</Text>
               </View>}
 
-              <Text style={[styles.sectionTitle, { fontSize: 17 * scale, marginTop: 18 * scale, marginBottom: 8 * scale }]}>Visible observations</Text>
+              <Text style={[styles.sectionTitle, { fontSize: 17 * scale, marginTop: 18 * scale, marginBottom: 8 * scale }]}>Detailed skin insights</Text>
               {analysisResult.observations.map((observation, index) => (
                 <View key={`${observation.category}-${index}`} style={[styles.observation, { borderRadius: 15 * scale, padding: 14 * scale, marginBottom: 7 * scale }]}>
                   <View style={styles.observationHeader}>
                     <Text style={[styles.observationTitle, { fontSize: 13 * scale }]}>{observation.title ?? CATEGORY_LABELS[observation.category]}</Text>
-                    <Text style={[styles.confidence, { fontSize: 9 * scale }]}>{visibilityLabel(observation)}</Text>
+                    {visibilityLabel(observation) && <Text style={[styles.confidence, { fontSize: 9 * scale }]}>{visibilityLabel(observation)}</Text>}
                   </View>
                   <Text style={[styles.body, { fontSize: 11.5 * scale, lineHeight: 17 * scale, marginTop: 5 * scale }]}>{observation.observation}</Text>
                   {observation.location && <Text style={[styles.timestamp, { fontSize: 11 * scale, marginTop: 7 * scale }]}>Visible area: {observation.location}</Text>}
@@ -92,6 +103,7 @@ const styles = StyleSheet.create({
   pink: { color: '#FF6395' },
   subheading: { color: '#FF95B4', fontFamily: 'InterExtraBold', letterSpacing: 0.8, textAlign: 'center' },
   summary: { width: '100%', backgroundColor: 'rgba(25,16,23,0.93)', borderColor: '#8C3B5B', borderWidth: 1 },
+  highlight: { backgroundColor: 'rgba(255,102,151,0.08)', borderWidth: 1, borderColor: 'rgba(255,126,168,0.24)' },
   qualityNotice: { width: '100%', backgroundColor: 'rgba(69,43,24,0.78)', borderWidth: 1, borderColor: '#A76A40' },
   qualityText: { color: '#FFE1C2', fontFamily: 'InterMedium' },
   photo: { alignSelf: 'center', borderWidth: 2, borderColor: '#FF6F9D' },

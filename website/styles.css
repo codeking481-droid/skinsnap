@@ -99,3 +99,6 @@ footer {
   nav { gap: 15px; }
   .hero, .document { width: calc(100% - 32px); }
 }
+
+.skip-link{position:absolute;left:8px;top:-80px;padding:12px;background:#ff9fbd;color:#08070c;z-index:10}.skip-link:focus{top:8px}
+form{display:grid;gap:12px;max-width:540px;margin:30px 0}label{font-size:14px;color:#f6e5ef}input{min-height:48px;max-width:100%;padding:12px;border:1px solid #775066;border-radius:10px;background:#160f17;color:#fff;font:inherit}input:focus-visible,button:focus-visible{outline:2px solid #ff9fbd;outline-offset:3px}.check-label{display:flex;gap:12px;line-height:1.6}.check-label input{width:22px;min-height:22px;flex:none}button{min-height:50px;padding:12px 18px;border:0;border-radius:24px;background:#ff86ac;color:#160910;font:inherit;font-weight:700;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}#delete-status{padding:16px;border-left:3px solid #ff86ac;background:#1d121c;max-width:640px}a,button{-webkit-tap-highlight-color:transparent}@media(max-width:560px){.site-header{align-items:flex-start;padding:22px 0;flex-direction:column;gap:16px}nav{gap:14px}nav a{min-height:36px;display:inline-flex;align-items:center}.document{padding-top:32px}h1{font-size:38px;overflow-wrap:anywhere}}

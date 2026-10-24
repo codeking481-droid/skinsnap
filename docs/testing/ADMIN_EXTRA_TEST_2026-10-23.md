@@ -1,5 +1,5 @@
-# One extra administrator test — 2026-10-23
+# Administrator development analysis allowance — 2026-10-23
 
-At the user's explicit request, the deployed `AI_ADMIN_TEST_MONTHLY_LIMIT` was raised from the default 20 to 21. This grants one additional reservation when rolling usage is at the prior cap. No usage records were deleted, no subscription rules were changed, and the maximum code-enforced admin cap remains 100. The ordinary development-account allowance remains unchanged.
+At the user's explicit request, the exact server-allowlisted administrator account is exempt from the rolling monthly analysis limit on the development-only endpoint. Other development accounts remain limited to two charged attempts in 30 days, and production analysis limits are unchanged. Existing usage records are not deleted. This exemption permits ongoing AI-provider usage and can incur charges.
 
-Worker version: `2e4d3e0c-6d3b-4dc8-8dd7-5fffb01304f0`. Working checkpoint Worker source retained. Deployed with `--keep-vars true`; dashboard variables and secrets preserved. The override is on the deployed Worker, not added to local configuration. Avoid lowering it during a later deployment or accidentally removing it; review usage before changing it again.
+Idempotency and per-request retry limits remain enforced. The exception is keyed exclusively to the authenticated user ID configured as `AI_ADMIN_TEST_USER_ID`; client-supplied flags cannot obtain it.

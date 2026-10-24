@@ -10,14 +10,13 @@ import {
   View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { loadRoutineProgress, saveRoutineProgress } from '../routineStorage';
 import { backOrReplace } from '../navigation';
 import { getRoutineProgressOwner } from '../services/userDataApi';
 import { loadAnalysisHistory, type AnalysisHistoryItem } from '../services/authApi';
-import { getVerifiedEntitlement } from '../services/billing';
 import {
   buildRoutineSteps,
   filterRoutineGuidance,
@@ -28,7 +27,6 @@ import {
 } from '../routinePresentation';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const developmentTestMode = __DEV__ && process.env.EXPO_PUBLIC_AI_DEV_TEST_MODE === 'true';
 const DEMO_ROUTINE = {
   morningRoutine: [
     'Use a gentle cleanser and rinse with lukewarm water.',
@@ -52,6 +50,7 @@ export default function RoutineScreen() {
   const [period, setPeriod] = useState<RoutinePeriod>('Morning');
   const [completedDays, setCompletedDays] = useState<string[]>([]);
   const [checked, setChecked] = useState<string[]>([]);
+  const [routineId, setRoutineId] = useState<string | undefined>();
   const [owner, setOwner] = useState<string | null>(null);
   const [routine, setRoutine] = useState<RoutineGuidance | null>(demoMode ? DEMO_ROUTINE : null);
   const [safetyNotice, setSafetyNotice] = useState<string | null>(null);
@@ -61,6 +60,7 @@ export default function RoutineScreen() {
   const [selectedStep, setSelectedStep] = useState<RoutineStep | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [loaded, setLoaded] = useState(demoMode);
+  const [progressChanged, setProgressChanged] = useState(false);
   const scale = Math.max(0.92, Math.min(Math.min(width, 520) / 393, 1.08));
 
   const morningSteps = useMemo(() => buildRoutineSteps(routine?.morningRoutine ?? [], 'Morning'), [routine]);
@@ -71,12 +71,24 @@ export default function RoutineScreen() {
     [routine],
   );
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     if (demoMode) return undefined;
     let active = true;
+    setLoading(true);
+    setSyncStatus(reloadKey ? 'Refreshing your saved routine...' : 'Loading your saved routine...');
+    setLoaded(false);
+    setProgressChanged(false);
+    setError(null);
+    setRoutine(null);
     void (async () => {
       try {
-        const accountId = await getRoutineProgressOwner();
+        let accountId: string | null = null;
+        let accountMessage: string | null = null;
+        try {
+          accountId = await getRoutineProgressOwner();
+        } catch (cause) {
+          accountMessage = cause instanceof Error ? cause.message : 'Secure account history is unavailable.';
+        }
         const savedProgress = await loadRoutineProgress(accountId ?? undefined);
         if (!active) return;
         setOwner(accountId);
@@ -84,20 +96,19 @@ export default function RoutineScreen() {
         setCompletedDays(savedProgress.completedDays);
         if (!accountId) {
           setRoutine(null);
-          setSyncStatus('Sign in to load account-specific routine history.');
-          setLoaded(true);
-          return;
-        }
-        const entitlement = await getVerifiedEntitlement();
-        if (!entitlement.active && !developmentTestMode) {
-          setRoutine(null);
-          setSyncStatus('A verified subscription is required to view saved AI routine guidance.');
+          setSyncStatus(`${accountMessage ?? 'Secure account history is unavailable.'} Routine completion is saved on this device.`);
           setLoaded(true);
           return;
         }
         const history = await loadAnalysisHistory();
         if (!active) return;
         const latest = history[0];
+        const currentRoutineId = latest?.resultId;
+        const scopedProgress = await loadRoutineProgress(accountId, currentRoutineId);
+        if (!active) return;
+        setRoutineId(currentRoutineId);
+        setChecked(scopedProgress.checkedSteps);
+        setCompletedDays(scopedProgress.completedDays);
         if (!latest) {
           setRoutine(null);
         } else {
@@ -128,20 +139,15 @@ export default function RoutineScreen() {
       }
     })();
     return () => { active = false; };
-  }, [demoMode, reloadKey]);
+  }, [demoMode, reloadKey]));
 
   useEffect(() => {
-    if (!loaded || demoMode) return undefined;
+    if (!loaded || demoMode || !progressChanged || !routine) return undefined;
     const snapshot = { checkedSteps: checked, completedDays };
-    const timeout = setTimeout(() => {
-      void saveRoutineProgress(snapshot, owner ?? undefined)
-        .then(() => setSyncStatus(owner
-          ? 'Progress saved on this device for your signed-in account.'
-          : 'Progress saved on this device.'))
-        .catch(() => setSyncStatus('Progress could not be saved on this device. Please try again.'));
-    }, 250);
-    return () => clearTimeout(timeout);
-  }, [checked, completedDays, demoMode, loaded, owner]);
+    if (!owner) return undefined;
+    void saveRoutineProgress(snapshot, owner, routineId)
+      .catch(() => setSyncStatus('Progress could not be saved on this device. Please try again.'));
+  }, [checked, completedDays, demoMode, loaded, owner, routineId, progressChanged, routine]);
 
   const today = new Date();
   const currentDayIndex = (today.getDay() + 6) % 7;
@@ -155,6 +161,7 @@ export default function RoutineScreen() {
   const todayKey = weekDates[currentDayIndex];
 
   const toggleStep = (id: string) => {
+    setProgressChanged(true);
     const next = checked.includes(id) ? checked.filter((value) => value !== id) : [...checked, id];
     setChecked(next);
     const dayComplete = allStepIds.length > 0 && allStepIds.every((stepId) => next.includes(stepId));
@@ -242,6 +249,9 @@ export default function RoutineScreen() {
                 ))}
               </View>
 
+              <Text accessibilityLiveRegion="polite" style={[styles.orderNote, { fontSize: 13 * scale, lineHeight: 19 * scale, marginTop: 12 * scale }]}>
+                {steps.filter((step) => checked.includes(step.id)).length} of {steps.length} {period.toLowerCase()} steps completed today
+              </Text>
               <Text style={[styles.orderNote, { fontSize: 11 * scale, lineHeight: 17 * scale, marginTop: 12 * scale }]}>
                 Steps are shown in the order returned by your saved routine. Tap a step for its guidance.
               </Text>
@@ -249,7 +259,7 @@ export default function RoutineScreen() {
                 const done = checked.includes(step.id);
                 return (
                   <View key={step.id} style={[styles.stepRow, { marginTop: 8 * scale }]}>
-                    <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: done }} onPress={() => toggleStep(step.id)} style={[styles.stepCheck, done && styles.stepCheckDone]}>
+                    <Pressable accessibilityRole="checkbox" accessibilityLabel={`Mark ${period.toLowerCase()} step ${step.order}: ${step.title}`} accessibilityState={{ checked: done }} onPress={() => toggleStep(step.id)} style={[styles.stepCheck, done && styles.stepCheckDone]}>
                       {done && <Svg width={16 * scale} height={16 * scale} viewBox="0 0 24 24" fill="none" stroke="#08090D" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round"><Path d="m4 12 5 5L20 6" /></Svg>}
                     </Pressable>
                     <Pressable accessibilityRole="button" accessibilityLabel={`Step ${step.order}, ${step.title}. Open details`} onPress={() => setSelectedStep(step)} style={styles.stepCard}>

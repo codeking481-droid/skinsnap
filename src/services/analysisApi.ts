@@ -10,10 +10,11 @@ import {
   type AnalysisDiagnostic,
 } from '../analysisDiagnostics';
 import { getVerifiedEntitlement } from './billing';
-import { getSessionToken, verifyAuthenticatedSession } from './session';
+import { ensureAuthenticatedSession, getSessionToken, sessionFailureMessage, verifyAuthenticatedSession } from './session';
 import { isAnalysisResponseAllowed } from '../subscriptionRules';
 import { isSafeCosmeticText } from '../routinePresentation';
-import { parseAnalysisQuality, parseObservationEvidence, type AnalysisQuality, type ObservationEvidence } from '../analysisQuality';
+import { runAnalysisOnce } from '../analysisRequestRegistry';
+import { parseAnalysisQuality, parseAnalysisPreferences, parseObservationEvidence, type AnalysisPreferences, type AnalysisQuality, type ObservationEvidence } from '../analysisQuality';
 import {
   analysisFailureStage,
   analysisRequestTimeoutMs,
@@ -47,6 +48,9 @@ const OBSERVATION_CATEGORIES = [
   'uneven-looking-tone',
   'visible-blemishes',
   'general-texture',
+  'natural-pores',
+  'color-variation',
+  'overall-finish',
 ] as const;
 
 export type SkinObservation = ObservationEvidence & {
@@ -254,8 +258,12 @@ async function prepareNativePhoto(photoUri: string, dimensions: { width: number;
     if (!prepared.uri) {
       continue;
     }
+    let discardedFile: File | null = null;
+    let keepPreparedFile = false;
     try {
+      if (prepared.uri === photoUri) throw photoPreparationError('manipulation', 'prepared-copy-required', 'A separate temporary photo copy could not be created. Your original photo was not changed.');
       const file = new File(prepared.uri);
+      discardedFile = file;
       const { size, type } = file;
       const validation = validatePreparedPhoto({
         exists: file.exists,
@@ -278,6 +286,7 @@ async function prepareNativePhoto(photoUri: string, dimensions: { width: number;
               : 'The prepared image dimensions could not be verified. Choose another photo or retake it.';
         throw photoPreparationError('file-access', `prepared-file-${validation.reason}`, message);
       }
+      keepPreparedFile = true;
       return {
         kind: 'native',
         part: createNativePhotoPart(file.uri),
@@ -288,6 +297,10 @@ async function prepareNativePhoto(photoUri: string, dimensions: { width: number;
     } catch (error) {
       if (error instanceof AnalysisRequestError) throw error;
       throw photoPreparationError('file-access', 'prepared-file-unreadable', 'The prepared photo could not be read securely. Choose another photo or retake it.');
+    } finally {
+      if (discardedFile && !keepPreparedFile && !cleanupPreparedPhoto(discardedFile)) {
+        throw photoPreparationError('file-access', 'discarded-copy-cleanup-failed', 'SkinSnap could not remove an unused temporary photo copy. Clear the app cache before sharing this device.');
+      }
     }
   }
   if (!manipulationSucceeded) {
@@ -338,15 +351,45 @@ async function preparePhotoForUpload(photoUri: string): Promise<PreparedPhoto> {
     : prepareNativePhoto(photoUri, dimensions);
 }
 
-export async function requestSkinAnalysis(
+export function requestSkinAnalysis(
+  photoUri: string, photoUploadConsent: boolean, idempotencyKey: string,
+  mode: 'premium' | 'development' = 'premium', preferences: AnalysisPreferences = {},
+): Promise<SkinAnalysisResult> {
+  return runAnalysisOnce(idempotencyKey, () => performSkinAnalysis(photoUri, photoUploadConsent, idempotencyKey, mode, preferences));
+}
+
+async function performSkinAnalysis(
   photoUri: string,
   photoUploadConsent: boolean,
   idempotencyKey: string,
   mode: 'premium' | 'development' = 'premium',
+  preferences: AnalysisPreferences = {},
 ): Promise<SkinAnalysisResult> {
+  if (mode === 'development' && !__DEV__) throw new AnalysisRequestError('development-test-unavailable', 'Development analysis is not available in release builds.');
+  const validatedPreferences = parseAnalysisPreferences(preferences);
   const requestId = diagnosticRequestId(idempotencyKey);
   if (!photoUploadConsent) {
     throw new AnalysisRequestError('consent-required', 'Confirm photo upload consent before requesting analysis.');
+  }
+  const url = backendUrl();
+  if (!url) {
+    throw new AnalysisRequestError('service-unavailable', 'Secure analysis is not configured yet. Your photo has not been uploaded.');
+  }
+  let session: Awaited<ReturnType<typeof verifyAuthenticatedSession>>;
+  try {
+    session = mode === 'premium'
+      ? await ensureAuthenticatedSession()
+      : await verifyAuthenticatedSession();
+  } catch {
+    logStageFailure('authentication', 'session-verification-failed');
+    throw new AnalysisRequestError('authentication-required', 'Your account could not be verified. Sign in again before requesting analysis.', 'authentication');
+  }
+  if (!session.valid) {
+    logStageFailure('authentication', `session-${session.reason}`, { requestId });
+    throw new AnalysisRequestError(
+      'authentication-required',
+      sessionFailureMessage(session),
+    );
   }
   if (mode === 'premium') {
     const entitlement = await getVerifiedEntitlement();
@@ -356,29 +399,6 @@ export async function requestSkinAnalysis(
       }
       throw new AnalysisRequestError('service-unavailable', 'Billing verification is unavailable. No photo was uploaded.');
     }
-  }
-
-  const url = backendUrl();
-  if (!url) {
-    throw new AnalysisRequestError('service-unavailable', 'Secure analysis is not configured yet. Your photo has not been uploaded.');
-  }
-  let session: Awaited<ReturnType<typeof verifyAuthenticatedSession>>;
-  try {
-    session = await verifyAuthenticatedSession();
-  } catch {
-    logStageFailure('authentication', 'session-verification-failed');
-    throw new AnalysisRequestError('authentication-required', 'Your account could not be verified. Sign in again before requesting analysis.', 'authentication');
-  }
-  if (!session.valid) {
-    logStageFailure('authentication', `session-${session.reason}`, { requestId });
-    throw new AnalysisRequestError(
-      'authentication-required',
-      session.reason === 'expired'
-        ? 'Your sign-in has expired. Sign in again to continue.'
-        : session.reason === 'identity-mismatch'
-          ? 'Your signed-in account could not be matched to its subscription. No photo was uploaded.'
-          : 'A valid signed-in account is required before a photo can be sent securely.',
-    );
   }
   if (__DEV__) console.info('[SkinSnap analysis]', { stage: 'connectivity', code: 'authenticated-json-ok', requestId, httpStatus: 200 });
   let token: string | null;
@@ -445,7 +465,10 @@ export async function requestSkinAnalysis(
           uploadTotalBytes = totalBytes;
         },
       );
-      const upload = await file.upload(endpoint, uploadRequest.options);
+      const upload = await file.upload(endpoint, {
+        ...uploadRequest.options,
+        headers: { ...uploadRequest.options.headers, 'X-SkinSnap-Preferences': JSON.stringify(validatedPreferences) },
+      });
       response = new Response(upload.body, { status: upload.status, headers: upload.headers });
     } else {
       const form = new FormData();
@@ -455,6 +478,7 @@ export async function requestSkinAnalysis(
       headers: {
         Authorization: `Bearer ${token}`,
         'Idempotency-Key': idempotencyKey,
+        'X-SkinSnap-Preferences': JSON.stringify(validatedPreferences),
       },
       body: form,
       signal: controller.signal,

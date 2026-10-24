@@ -22,6 +22,7 @@ import { usePhoto } from '../PhotoContext';
 import { backOrReplace } from '../navigation';
 import { validatePhoto } from '../photoValidation';
 import { PHOTO_ANALYSIS_CONSENT_VERSION } from '../privacy';
+import { AnalysisPreferencesForm } from '../components/AnalysisPreferencesForm';
 
 function FaceGuide({ size }: { size: number }) {
   return (
@@ -35,7 +36,7 @@ function FaceGuide({ size }: { size: number }) {
 export default function UploadScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const { photoUri, setPhotoUri, photoUploadConsent, setPhotoUploadConsent, setAnalysisResult } = usePhoto();
+  const { photoUri, setPhotoUri, photoUploadConsent, setPhotoUploadConsent, setAnalysisResult, analysisPreferences, setAnalysisPreferences } = usePhoto();
   const [permission, requestPermission] = useCameraPermissions();
   const [refreshedPermission, setRefreshedPermission] = useState<typeof permission>(null);
   const cameraPermission = refreshedPermission ?? permission;
@@ -241,6 +242,7 @@ export default function UploadScreen() {
             <Text style={styles.tipsBody}>Use natural light and avoid filters.{ '\n' }This screen does not detect faces; choose a photo where your face is clearly visible.</Text>
           </View>
 
+          <AnalysisPreferencesForm value={analysisPreferences} onChange={setAnalysisPreferences} />
           <Pressable
             accessibilityRole="checkbox"
             accessibilityState={{ checked: photoConsent }}
@@ -249,7 +251,7 @@ export default function UploadScreen() {
             style={styles.consentRow}
           >
             <View style={[styles.checkbox, photoConsent && styles.checkboxActive]}>{photoConsent && <Text style={styles.checkmark}>✓</Text>}</View>
-            <Text style={styles.consentText}>I consent to send this photo securely to SkinSnap and Groq for cosmetic photo observations and general skincare guidance. Groq receives the photo for visual analysis, then text observations and any optional preferences for routine guidance. Lighting and image quality can affect results; this is not medical advice. SkinSnap saves analysis results for account history. SkinSnap-controlled photo copies are not kept in analysis history, but provider handling follows their own terms.</Text>
+            <Text style={styles.consentText}>I consent to send this photo securely to SkinSnap and Groq for cosmetic observations and general skincare guidance. Groq receives the photo for visual analysis, then text observations and any optional preferences for routine guidance. Lighting and image quality can affect results; this is not medical advice. SkinSnap saves analysis results, not the photo, to account history. The prepared copy is removed after processing when cleanup succeeds. You can request account-data deletion in Progress → Account &amp; data settings; provider copies follow their own terms.</Text>
           </Pressable>
           <View style={styles.privacyLinks}>
             <Text style={styles.consentVersion}>Disclosure {PHOTO_ANALYSIS_CONSENT_VERSION}</Text>

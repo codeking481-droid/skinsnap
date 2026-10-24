@@ -1,37 +1,31 @@
-# Google Play Health apps declaration — recommendation
+# Google Play Health apps declaration — review
 
-**Prepared:** 2026-10-22  
-**Status:** Requires Play Console owner review; this document is not a submitted declaration.
+**Prepared:** 23 October 2026
+**Status:** Requires Play Console owner and legal review; this is not a submitted declaration.
 
-## Evidence from the product
+## Product evidence
 
-SkinSnap accepts a face/skin photograph, returns visible skin observations, and generates cosmetic routines. It explicitly disclaims diagnosis and medical advice. It does not currently claim disease detection, treatment, prevention, medical-device status, or clinical use in the inspected UI and Worker prompts.
+SkinSnap accepts a face/skin photo, returns observations limited to visible cosmetic features, and generates general cosmetic routines. The current Worker uses Groq's Qwen vision model and Groq text generation. It does not claim disease detection, diagnosis, treatment, prevention, medical-device status, or clinical use. The user interface directs medical concerns to a qualified healthcare professional.
 
-Google's current Health apps declaration guidance lists "skin care" as an example under Medical → Diseases and Conditions Management. This makes a no-health-features declaration unsafe to assume. It does not by itself determine the correct category for SkinSnap's specifically cosmetic, non-diagnostic feature.
+Google's Health apps declaration materials include skin care in their examples. The app's cosmetic and non-diagnostic positioning does not determine by itself which Play Console health category applies.
 
-## Recommended declaration review
+## Required owner review
 
-1. Declare the photo-based skin-care functionality accurately.
-2. Review the Medical category and specifically whether Google's "skin care" example applies to this non-diagnostic cosmetic product.
-3. Do not mark the app as a regulated medical device or disease-management tool without evidence/authorization.
-4. If the Play Console form permits more than one category, select only those accurately supported by implemented features.
-5. Ensure the store listing clearly says the app is not a medical device, does not diagnose/treat/cure/prevent a condition, and tells users with medical concerns to consult a qualified healthcare professional, as required by the applicable current policy.
-6. State device compatibility for camera-based health functions in the store description.
-7. Reassess if the app adds symptom tracking, diagnosis, disease claims, treatment recommendations, or clinical integrations.
+1. Review the current Google Play Health apps declaration and Health Content and Services policy.
+2. Ask qualified counsel whether Google's Medical category applies to this photo-based skincare feature.
+3. Declare only categories supported by the actual final app. Do not claim regulated medical-device status or disease-management functionality without evidence and authorization.
+4. Ensure the listing and screenshots clearly describe the cosmetic, non-diagnostic purpose and limitations.
+5. Reassess if the app later adds symptom tracking, diagnosis, disease claims, treatment advice, or clinical integrations.
 
-## Risks and controls
+## Controls and limitations
 
-- The Gemini prompt restricts observations to visible characteristics and prohibits diagnosis and sensitive-attribute inference.
-- The Worker validates enumerated categories, confidence, length, and a restricted-health language list. Client parsing validates again; routines are filtered.
-- Language filters are not a substitute for model evaluation or human review. False negatives and false positives are possible.
-- Output moderation tests are synthetic unit tests only. No clinical validation is claimed.
-- Gemini's API terms prohibit clinical use or providing medical advice. Keep SkinSnap strictly cosmetic and obtain provider/legal review before changing product claims.
+- The Worker prompt instructs the vision model to report only supported visible features and prohibits identity, age, ethnicity, attractiveness, disease, prescription, or guaranteed-result inferences.
+- The Worker validates category, confidence, length, and restricted medical language; client parsing validates the response again.
+- Language filters and synthetic tests do not establish clinical validation, accuracy, safety, or regulatory status.
+- Lighting, camera quality, filters, and image detail can affect the output.
 
-## Official references
-
-Accessed 2026-10-22:
+## References
 
 - [Health apps declaration](https://support.google.com/googleplay/android-developer/answer/14738291?hl=en)
 - [Health app categories and additional information](https://support.google.com/googleplay/android-developer/answer/13996367?hl=en)
 - [Health Content and Services policy](https://support.google.com/googleplay/android-developer/answer/16679511?hl=en)
-- [Gemini API Terms](https://ai.google.dev/gemini-api/terms)

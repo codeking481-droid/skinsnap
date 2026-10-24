@@ -1,4 +1,4 @@
-import { clearSessionToken, getSessionToken, saveAuthenticatedSession } from './session';
+import { clearSessionToken, ensureAuthenticatedSession, getSessionToken, saveAuthenticatedSession, sessionFailureMessage } from './session';
 import { parseAnalysisResult, type SkinAnalysisResult } from './analysisApi';
 import { deleteRoutineProgress } from '../routineStorage';
 
@@ -101,8 +101,10 @@ export type AnalysisHistoryItem = SkinAnalysisResult;
 
 export async function loadAnalysisHistory(): Promise<AnalysisHistoryItem[]> {
   const { apiUrl } = config();
+  const session = await ensureAuthenticatedSession();
+  if (!session.valid) throw new AuthApiError(sessionFailureMessage(session));
   const token = await getSessionToken();
-  if (!token) throw new AuthApiError('Sign in to view your saved analysis history.');
+  if (!token) throw new AuthApiError('A secure guest session is required to view saved analysis history.');
   let response: Response;
   try {
     response = await fetch(`${apiUrl}/v1/history`, {
@@ -151,9 +153,9 @@ export async function deleteAccountData(): Promise<void> {
       headers: { Authorization: `Bearer ${token}` },
     });
   } catch {
-    throw new AuthApiError('Could not reach the account service. Your account was not deleted; retry when online.');
+    throw new AuthApiError('The deletion response could not be received. Some or all data may already have been deleted. Retry when online; do not assume your data is unchanged.');
   }
-  if (!response.ok) throw new AuthApiError('Account deletion could not be confirmed. Your account was not deleted; please retry.');
+  if (!response.ok) throw new AuthApiError('Account deletion is not confirmed. Some data may already have been removed; retry deletion to finish.');
   try {
     await deleteRoutineProgress(accountId);
   } catch {

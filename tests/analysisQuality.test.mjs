@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseAnalysisPreferences, parseAnalysisQuality, parseObservationEvidence, visibilityLabel } from '../src/analysisQuality.ts';
+import { parseAnalysisPreferences, parseAnalysisQuality, parseObservationEvidence, visibilityLabel, VISION_RESPONSE_SCHEMA } from '../src/analysisQuality.ts';
 const safe = text => !/bleach|diagnos/i.test(text);
 
 test('optional preferences accept only known values, never arbitrary prompt text', () => {
@@ -24,7 +24,16 @@ test('quality metadata must be internally consistent, bounded and useful', () =>
   assert.throws(() => parseAnalysisQuality({ ...value, limitations: [] }, safe));
 });
 test('visibility labels never turn old model confidence into calibrated accuracy', () => {
-  assert.equal(visibilityLabel({ confidence: 'high' }), 'Visibility not recorded');
+  assert.equal(visibilityLabel({ confidence: 'high' }), null);
   assert.equal(visibilityLabel({ confidence: 'high', visibility: 'clearly-visible' }), 'Clearly visible');
   assert.equal(visibilityLabel({ confidence: 'low', visibility: 'possibly-visible' }), 'Possibly visible');
+});
+test('vision contract exposes seven optional categories and structured insight explanations', () => {
+  const observation = VISION_RESPONSE_SCHEMA.properties.observations.items;
+  assert.deepEqual(VISION_RESPONSE_SCHEMA.required, ['analysisUsable', 'imageQuality', 'summary', 'observations']);
+  assert.equal(observation.properties.category.enum.length, 7);
+  assert.ok(!observation.required.includes('whyItMatters'));
+  assert.ok(!observation.required.includes('practicalSuggestion'));
+  assert.ok(observation.properties.whyItMatters);
+  assert.ok(observation.properties.practicalSuggestion);
 });
