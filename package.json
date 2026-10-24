@@ -3,17 +3,17 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "dependencies": {
-    "expo": "^58.0.17",
+    "expo": "~58.0.19",
     "expo-camera": "~58.0.12",
     "expo-constants": "~58.0.13",
-    "expo-dev-client": "~58.0.14",
-    "expo-file-system": "~58.0.10",
-    "expo-font": "~58.0.9",
+    "expo-dev-client": "~58.0.15",
+    "expo-file-system": "~58.0.11",
+    "expo-font": "~58.0.10",
     "expo-image-manipulator": "~58.0.15",
     "expo-image-picker": "~58.0.10",
     "expo-linear-gradient": "~58.0.3",
     "expo-linking": "~58.0.14",
-    "expo-router": "~58.0.25",
+    "expo-router": "~58.0.26",
     "expo-secure-store": "~58.0.2",
     "expo-splash-screen": "~58.0.11",
     "expo-status-bar": "~58.0.4",
@@ -52,5 +52,10 @@
     "worker:check": "wrangler deploy --dry-run --config wrangler.jsonc",
     "worker:deploy": "wrangler deploy --config wrangler.jsonc --keep-vars true"
   },
-  "private": true
+  "private": true,
+  "overrides": {
+    "miniflare": {
+      "undici": "7.30.1"
+    }
+  }
 }

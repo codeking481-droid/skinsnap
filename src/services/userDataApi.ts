@@ -13,6 +13,7 @@ export async function getRoutineProgressOwner(): Promise<string | null> {
   const baseUrl = apiUrl();
   if (!baseUrl) throw new Error('Your account could not be verified for routine progress.');
   const response = await fetch(`${baseUrl}/v1/session`, {
+      signal: AbortSignal.timeout(20000),
     headers: { Authorization: ['Bearer ', token].join('') },
   });
   if (response.status === 401) throw new Error('Your sign-in has expired. Sign in again to access routine progress.');

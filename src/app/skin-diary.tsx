@@ -29,7 +29,11 @@ export default function SkinDiaryScreen() {
     if (!isLocalDate(next) || next > localDayKey()) { setStatus('Choose today or an earlier date in YYYY-MM-DD format.'); return; }
     const open = async () => {
       if (busy) return; setBusy(true);
-      try { const saved = entries.find(e => e.date === next) ?? await loadDiaryEntry(next); setEntry(saved ?? blank(next)); setDate(next); setDirty(false); setStatus('Check-in for ' + next); }
+      try {
+        const saved = entries.find(e => e.date === next) ?? await loadDiaryEntry(next);
+        if (saved) setEntries(items => [...items.filter(e => e.date !== saved.date), saved].sort((a, b) => b.date.localeCompare(a.date)));
+        setEntry(saved ?? blank(next)); setDate(next); setDirty(false); setStatus('Check-in for ' + next);
+      }
       catch (e) { setStatus(e instanceof Error ? e.message : 'Could not open that date. Your draft is unchanged.'); }
       finally { setBusy(false); }
     };

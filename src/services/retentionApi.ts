@@ -14,7 +14,23 @@ async function request(path: string, method = 'GET', body?: unknown): Promise<un
     }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   } catch { throw new Error('Connection unavailable. Changes are not confirmed saved. Keep this screen open and retry.'); }
   if (response.status === 401) throw new Error('Your session expired. Please reconnect or sign in.');
-  if (response.status === 503 || response.status === 404) throw new Error('This feature is awaiting its database and server update. Your existing analysis still works.');
+  if (response.status === 503) {
+    const payload: unknown = await response.json().catch(() => null);
+    const code = payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>).error
+      : undefined;
+    if (code === 'retention-not-enabled') {
+      throw new Error('Diary and saved preferences are not enabled on the service yet. Your existing analysis still works. Your changes were not saved.');
+    }
+    if (code === 'database-unavailable') {
+      throw new Error('The secure data service could not complete this request. Your changes were not confirmed saved. Please retry.');
+    }
+    if (code === 'database-schema-not-ready') {
+      throw new Error('The secure data service is missing a required database update. Your changes were not saved. Please try again later.');
+    }
+    throw new Error('The service is temporarily unavailable. Your changes were not confirmed saved. Please retry.');
+  }
+  if (response.status === 404) throw new Error('This app feature is not available on the current server version. Your changes were not saved.');
   if (!response.ok) throw new Error('The change could not be confirmed. Check your input and retry.');
   return response.json();
 }

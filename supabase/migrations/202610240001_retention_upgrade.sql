@@ -2,7 +2,9 @@
 begin;
 create table if not exists public.skincare_preferences (
   user_id uuid primary key references auth.users(id) on delete cascade,
-  data jsonb not null check (jsonb_typeof(data) = 'object' and data ? 'consent' and data->>'consent' = 'true'),
+  data jsonb not null check (jsonb_typeof(data) = 'object' and data ? 'consent'
+    and jsonb_typeof(data->'consent') = 'boolean' and data->>'consent' = 'true'
+    and data ? 'preferences' and jsonb_typeof(data->'preferences') = 'object'),
   updated_at timestamptz not null default now()
 );
 -- Reuse the existing customization table; immutable AI suggestions stay in analysis_jobs.
@@ -14,7 +16,8 @@ create table if not exists public.routines (
 create table if not exists public.skin_diary_entries (
   user_id uuid not null references auth.users(id) on delete cascade,
   entry_date date not null,
-  data jsonb not null check (jsonb_typeof(data) = 'object' and data->>'date' = entry_date::text),
+  data jsonb not null check (jsonb_typeof(data) = 'object' and data ? 'date'
+    and jsonb_typeof(data->'date') = 'string' and data->>'date' = entry_date::text),
   updated_at timestamptz not null default now(),
   primary key (user_id, entry_date)
 );
@@ -30,7 +33,7 @@ create policy "Retention own routines" on public.routines for all to authenticat
 drop policy if exists "Retention own diary" on public.skin_diary_entries;
 create policy "Retention own diary" on public.skin_diary_entries for all to authenticated
   using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
-revoke all on public.skincare_preferences, public.routines, public.skin_diary_entries from anon;
+revoke all on public.skincare_preferences, public.routines, public.skin_diary_entries from public, anon;
 grant select, insert, update, delete on public.skincare_preferences, public.routines, public.skin_diary_entries to authenticated, service_role;
 -- The diary primary key supports owner-scoped date ranges and idempotent daily upserts.
 commit;

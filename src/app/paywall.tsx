@@ -18,6 +18,7 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { PurchasesPackage } from 'react-native-purchases';
 import { usePhoto } from '../PhotoContext';
+import { PUBLISHED_PRIVACY_POLICY_URL, PUBLISHED_TERMS_URL } from '../privacy';
 import {
   calculateSavingsPercent,
   type SubscriptionPlan,
@@ -126,8 +127,7 @@ export default function PaywallScreen() {
     : null;
   const storeReady = billingState?.kind === 'ready';
   const developmentPreview = usesDevelopmentPricePreview(__DEV__, billingState?.kind, Platform.OS);
-  const legalConfigured = [process.env.EXPO_PUBLIC_TERMS_URL, process.env.EXPO_PUBLIC_PRIVACY_URL]
-    .every((url) => Boolean(url && url.startsWith('https://')));
+  const legalConfigured = Boolean(PUBLISHED_TERMS_URL && PUBLISHED_PRIVACY_POLICY_URL);
   const canPurchase = SUBSCRIPTION_PURCHASES_ENABLED
     && storeReady
     && Boolean(selectedPackage)
@@ -241,8 +241,8 @@ export default function PaywallScreen() {
   };
 
   const openLegal = async (kind: 'terms' | 'privacy') => {
-    const url = kind === 'terms' ? process.env.EXPO_PUBLIC_TERMS_URL : process.env.EXPO_PUBLIC_PRIVACY_URL;
-    if (!url?.startsWith('https://')) {
+    const url = kind === 'terms' ? PUBLISHED_TERMS_URL : PUBLISHED_PRIVACY_POLICY_URL;
+    if (!url) {
       if (kind === 'privacy') {
         router.push('/privacy');
         return;

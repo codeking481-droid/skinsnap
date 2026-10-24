@@ -11,38 +11,62 @@ const SESSION_REFRESH_TOKEN_KEY = 'skinsnap-auth-refresh-token';
 const SESSION_EXPIRY_KEY = 'skinsnap-auth-expires-at';
 const SESSION_ANONYMOUS_KEY = 'skinsnap-auth-is-anonymous';
 let anonymousSessionPromise: Promise<SessionCheck> | null = null;
+let refreshPromise: Promise<string | null> | null = null;
+let sessionGeneration = 0;
+let storageWrites: Promise<void> = Promise.resolve();
+
+function writeSession(action: () => Promise<void>): Promise<void> {
+  const next = storageWrites.catch(() => undefined).then(action);
+  storageWrites = next;
+  return next;
+}
 
 export async function getSessionToken(): Promise<string | null> {
+  if (refreshPromise) return refreshPromise;
+  const pending = readOrRefreshSessionToken(sessionGeneration);
+  refreshPromise = pending;
+  try { return await pending; }
+  finally { if (refreshPromise === pending) refreshPromise = null; }
+}
+
+async function readOrRefreshSessionToken(generation: number): Promise<string | null> {
+  await storageWrites.catch(() => undefined);
+  if (generation !== sessionGeneration) return null;
   const accessToken = await SecureStore.getItemAsync(SESSION_TOKEN_KEY);
   const expiryValue = await SecureStore.getItemAsync(SESSION_EXPIRY_KEY);
   const expiresAt = Number(expiryValue);
-  if (!accessToken || !Number.isFinite(expiresAt) || Date.now() + 60_000 < expiresAt) return accessToken;
+  if (!accessToken || !Number.isFinite(expiresAt) || Date.now() + 60_000 < expiresAt) return generation === sessionGeneration ? accessToken : null;
 
   const refreshToken = await SecureStore.getItemAsync(SESSION_REFRESH_TOKEN_KEY);
   const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim().replace(/\/+$/, '');
   const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim();
-  if (!refreshToken || !baseUrl?.startsWith('https://') || !anonKey) return accessToken;
+  if (!refreshToken || !baseUrl?.startsWith('https://') || !anonKey) return generation === sessionGeneration ? accessToken : null;
 
   try {
     const response = await fetch(`${baseUrl}/auth/v1/token?grant_type=refresh_token`, {
       method: 'POST',
+      signal: AbortSignal.timeout(15000),
       headers: { apikey: anonKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: refreshToken }),
     });
-    if (!response.ok) return accessToken;
+    if (!response.ok) return generation === sessionGeneration ? accessToken : null;
     const refreshed: unknown = await response.json();
-    if (!refreshed || typeof refreshed !== 'object' || Array.isArray(refreshed)) return accessToken;
+    if (!refreshed || typeof refreshed !== 'object' || Array.isArray(refreshed)) return generation === sessionGeneration ? accessToken : null;
     const values = refreshed as Record<string, unknown>;
-    if (typeof values.access_token !== 'string' || typeof values.refresh_token !== 'string') return accessToken;
+    if (typeof values.access_token !== 'string' || typeof values.refresh_token !== 'string') return generation === sessionGeneration ? accessToken : null;
     const nextExpiry = Date.now() + (typeof values.expires_in === 'number' ? values.expires_in : 3600) * 1000;
-    await Promise.all([
-      SecureStore.setItemAsync(SESSION_TOKEN_KEY, values.access_token),
-      SecureStore.setItemAsync(SESSION_REFRESH_TOKEN_KEY, values.refresh_token),
-      SecureStore.setItemAsync(SESSION_EXPIRY_KEY, String(nextExpiry)),
-    ]);
-    return values.access_token;
+    if (generation !== sessionGeneration) return null;
+    await writeSession(async () => {
+      if (generation !== sessionGeneration) return;
+      await Promise.all([
+        SecureStore.setItemAsync(SESSION_TOKEN_KEY, values.access_token as string),
+        SecureStore.setItemAsync(SESSION_REFRESH_TOKEN_KEY, values.refresh_token as string),
+        SecureStore.setItemAsync(SESSION_EXPIRY_KEY, String(nextExpiry)),
+      ]);
+    });
+    return generation === sessionGeneration ? values.access_token : null;
   } catch {
-    return accessToken;
+    return generation === sessionGeneration ? accessToken : null;
   }
 }
 
@@ -91,6 +115,7 @@ export async function verifyAuthenticatedSession(): Promise<SessionCheck> {
   try {
     const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/v1/session`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(15000),
     });
     if (response.status === 401 || response.status === 403) return { valid: false, reason: 'expired' };
     if (!response.ok) return { valid: false, reason: 'backend-unavailable' };
@@ -117,6 +142,7 @@ export async function verifyAuthenticatedSession(): Promise<SessionCheck> {
 export async function ensureAuthenticatedSession(): Promise<SessionCheck> {
   if (anonymousSessionPromise) return anonymousSessionPromise;
   anonymousSessionPromise = (async () => {
+    const generation = sessionGeneration;
     const token = await getSessionToken();
     if (token) {
       const session = await verifyAuthenticatedSession();
@@ -149,8 +175,10 @@ export async function ensureAuthenticatedSession(): Promise<SessionCheck> {
     }
 
     const expiresAt = Date.now() + anonymous.expiresIn * 1000;
+    if (generation !== sessionGeneration) return { valid: false, reason: 'expired' };
+    let savedGeneration: number;
     try {
-      await storeSessionTokens(
+      savedGeneration = await storeSessionTokens(
         anonymous.accessToken,
         anonymous.refreshToken,
         expiresAt,
@@ -160,6 +188,7 @@ export async function ensureAuthenticatedSession(): Promise<SessionCheck> {
       return { valid: false, reason: 'backend-unavailable' };
     }
     try {
+      if (savedGeneration !== sessionGeneration) return { valid: false, reason: 'expired' };
       await verifyAnonymousBackendIdentity(
         process.env.EXPO_PUBLIC_API_URL,
         anonymous.accessToken,
@@ -176,7 +205,10 @@ export async function ensureAuthenticatedSession(): Promise<SessionCheck> {
     }
 
     try {
-      await logInRevenueCatUser(anonymous.userId);
+      await writeSession(async () => {
+        if (savedGeneration !== sessionGeneration) throw new Error('Session changed.');
+        await logInRevenueCatUser(anonymous.userId);
+      });
     } catch {
       return { valid: false, reason: 'identity-mismatch', userId: anonymous.userId, revenueCatAppUserId: anonymous.userId };
     }
@@ -194,20 +226,27 @@ async function storeSessionTokens(
   refreshToken: string | undefined,
   expiresAt: number | undefined,
   isAnonymous: boolean,
-): Promise<void> {
-  await SecureStore.deleteItemAsync(SESSION_TOKEN_KEY);
-  await Promise.all([
-    refreshToken
-      ? SecureStore.setItemAsync(SESSION_REFRESH_TOKEN_KEY, refreshToken)
-      : SecureStore.deleteItemAsync(SESSION_REFRESH_TOKEN_KEY),
-    expiresAt
-      ? SecureStore.setItemAsync(SESSION_EXPIRY_KEY, String(expiresAt))
-      : SecureStore.deleteItemAsync(SESSION_EXPIRY_KEY),
-    SecureStore.setItemAsync(SESSION_ANONYMOUS_KEY, isAnonymous ? 'true' : 'false'),
-  ]);
-  await SecureStore.setItemAsync(SESSION_TOKEN_KEY, token, {
-    keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
+): Promise<number> {
+  sessionGeneration++;
+  const generation = sessionGeneration;
+  refreshPromise = null;
+  await writeSession(async () => {
+    if (generation !== sessionGeneration) return;
+    await SecureStore.deleteItemAsync(SESSION_TOKEN_KEY);
+    await Promise.all([
+      refreshToken
+        ? SecureStore.setItemAsync(SESSION_REFRESH_TOKEN_KEY, refreshToken)
+        : SecureStore.deleteItemAsync(SESSION_REFRESH_TOKEN_KEY),
+      expiresAt
+        ? SecureStore.setItemAsync(SESSION_EXPIRY_KEY, String(expiresAt))
+        : SecureStore.deleteItemAsync(SESSION_EXPIRY_KEY),
+      SecureStore.setItemAsync(SESSION_ANONYMOUS_KEY, isAnonymous ? 'true' : 'false'),
+    ]);
+    await SecureStore.setItemAsync(SESSION_TOKEN_KEY, token, {
+      keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
+    });
   });
+  return generation;
 }
 
 export async function saveAuthenticatedSession(
@@ -218,16 +257,20 @@ export async function saveAuthenticatedSession(
   isAnonymous = false,
 ): Promise<void> {
   if (!token.trim()) throw new Error('A non-empty authenticated session token is required.');
-  await storeSessionTokens(token, refreshToken, expiresAt, isAnonymous);
-  await logInRevenueCatUser(revenueCatAppUserId);
+  const generation = await storeSessionTokens(token, refreshToken, expiresAt, isAnonymous);
+  await writeSession(async () => {
+    if (generation !== sessionGeneration) throw new Error('Session changed before subscription identity was saved.');
+    await logInRevenueCatUser(revenueCatAppUserId);
+  });
 }
 
 export async function clearSessionToken(): Promise<void> {
-  await Promise.all([
+  sessionGeneration++;
+  refreshPromise = null;
+  await writeSession(async () => { await Promise.all([
     SecureStore.deleteItemAsync(SESSION_TOKEN_KEY),
     SecureStore.deleteItemAsync(SESSION_REFRESH_TOKEN_KEY),
     SecureStore.deleteItemAsync(SESSION_EXPIRY_KEY),
     SecureStore.deleteItemAsync(SESSION_ANONYMOUS_KEY),
-    logOutRevenueCatUser(),
-  ]);
+  ]); await logOutRevenueCatUser(); });
 }

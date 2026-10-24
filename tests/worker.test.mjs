@@ -93,7 +93,58 @@ async function requestAnalysisWithOutputs(visionResult, groqResult = null, optio
 }
 
 test('health check is public, minimal, and does not require configured secrets', async () => {
-  const response = await worker.fetch(new Request('https://skinsnap.test/health'), {});
+  const response = await worker.fetch(new Request('https://skinsnap.test/health'), {  });
+
+  test('retention endpoints report the disabled feature gate after authentication without database access', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests = [];
+    globalThis.fetch = async input => {
+      const url = String(input);
+      requests.push(url);
+      if (url.endsWith('/auth/v1/user')) return new Response(JSON.stringify({ id: 'retention-test-user' }), { status: 200 });
+      throw new Error(`Unexpected test request: ${url}`);
+    };
+    try {
+      const response = await worker.fetch(new Request('https://skinsnap.test/v1/diary', {
+        headers: { Authorization: 'Bearer test-session' },
+      }), {
+        SUPABASE_URL: 'https://supabase.test',
+        SUPABASE_PUBLISHABLE_KEY: 'test-publishable-key',
+        SUPABASE_SECRET_KEY: 'test-secret-key',
+      });
+      assert.equal(response.status, 503);
+      assert.equal((await response.json()).error, 'retention-not-enabled');
+      assert.equal(requests.length, 1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('retention endpoints identify a missing database migration instead of reporting a transient outage', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async input => {
+      const url = String(input);
+      if (url.endsWith('/auth/v1/user')) return new Response(JSON.stringify({ id: 'retention-test-user' }), { status: 200 });
+      if (url.includes('/rest/v1/skin_diary_entries?')) {
+        return new Response(JSON.stringify({ code: 'PGRST205', message: 'table not found' }), { status: 404 });
+      }
+      throw new Error(`Unexpected test request: ${url}`);
+    };
+    try {
+      const response = await worker.fetch(new Request('https://skinsnap.test/v1/diary', {
+        headers: { Authorization: 'Bearer test-session' },
+      }), {
+        RETENTION_ENABLED: 'true',
+        SUPABASE_URL: 'https://supabase.test',
+        SUPABASE_PUBLISHABLE_KEY: 'test-publishable-key',
+        SUPABASE_SECRET_KEY: 'test-secret-key',
+      });
+      assert.equal(response.status, 503);
+      assert.equal((await response.json()).error, 'database-schema-not-ready');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { status: 'ok', service: 'skinsnap-api' });
   assert.equal(response.headers.get('cache-control'), 'no-store');
@@ -765,6 +816,25 @@ test('small or moderately blurry but usable photos complete cautiously without i
   const visionPrompt = requests.find(request => request.model === 'qwen/qwen3.8-27b').body.messages[0].content[0].text;
   assert.match(visionPrompt, /small or imperfect photos/i);
   assert.match(visionPrompt, /zero to seven supported observations/i);
+  assert.match(visionPrompt, /Do not reject a photo solely because it is blurry or small/i);
+});
+
+test('recognizable but very soft skin photos may complete with no findings and general guidance', async () => {
+  const { response, requests } = await requestAnalysisWithOutputs({
+    analysisUsable: true,
+    imageQuality: 'limited',
+    summary: 'Skin is visible, but the soft focus does not support specific observations.',
+    observations: [],
+  }, {
+    morningRoutine: ['Use a gentle cleanser if needed, then moisturizer and sunscreen.'],
+    eveningRoutine: ['Cleanse gently and apply moisturizer.'],
+    precautions: ['This is general guidance because the photo is soft.'],
+  });
+  assert.equal(response.status, 201);
+  const result = await response.json();
+  assert.equal(result.imageQuality, 'limited');
+  assert.deepEqual(result.observations, []);
+  assert.ok(requests.some(request => request.model === 'openai/gpt-oss-20b'));
 });
 
 test('usable limited-quality photos with no supported findings receive only general routine guidance', async () => {

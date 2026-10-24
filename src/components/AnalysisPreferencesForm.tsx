@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { PROFILE_OPTIONS, type AnalysisPreferences } from '../analysisQuality';
 
@@ -14,28 +13,23 @@ const LABELS: Record<string, string> = {
   'budget-friendly': 'Budget-friendly', flexible: 'Flexible',
 };
 export function AnalysisPreferencesForm({ value, onChange, extended = false }: { value: AnalysisPreferences; onChange: (value: AnalysisPreferences) => void; extended?: boolean }) {
-  const [open, setOpen] = useState(false);
   return <View style={styles.card}>
-    <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => setOpen(!open)} style={styles.toggle}>
-      <Text style={styles.title}>Make your routine yours · Optional {open ? '−' : '+'}</Text>
-    </Pressable>
-    {open && <>
-      <Text style={styles.hint}>Your answers guide the routine, not the photo findings. Skip any question. Answers are sent with your analysis. Changes are remembered for later only when you explicitly save them in My Skin Preferences.</Text>
-      {(Object.keys(PROFILE_OPTIONS) as (keyof typeof PROFILE_OPTIONS)[]).filter(key => extended || !['fragranceFree', 'experience'].includes(key)).map(key => <View key={key} style={styles.question}>
-        <Text style={styles.label}>{LABELS[key]}</Text>
-        <View style={styles.options}>{PROFILE_OPTIONS[key].map(option => <Pressable key={option}
-          accessibilityRole="checkbox" accessibilityState={{ checked: value[key] === option }}
-          onPress={() => {
-            const next = { ...value };
-            if (next[key] === option) delete next[key];
-            else Object.assign(next, { [key]: option });
-            onChange(next);
-          }} style={[styles.chip, value[key] === option && styles.selected]}>
-          <Text style={styles.text}>{LABELS[option]}</Text>
-        </Pressable>)}</View>
-      </View>)}
-      <Pressable accessibilityRole="button" onPress={() => onChange({})} style={styles.toggle}><Text style={styles.hint}>Clear answers</Text></Pressable>
-    </>}
+    <Text accessibilityRole="header" style={styles.title}>Personalize your routine</Text>
+    <Text style={styles.hint}>These answers guide your routine, not the photo findings. Every answer is optional. Selected answers go with your analysis and are remembered only if you explicitly save them in My Skin Preferences.</Text>
+    {(Object.keys(PROFILE_OPTIONS) as (keyof typeof PROFILE_OPTIONS)[]).filter(key => extended || !['fragranceFree', 'experience'].includes(key)).map(key => <View key={key} style={styles.question}>
+      <Text style={styles.label}>{LABELS[key]}</Text>
+      <View style={styles.options}>{PROFILE_OPTIONS[key].map(option => <Pressable key={option}
+        accessibilityRole="checkbox" accessibilityState={{ checked: value[key] === option }}
+        onPress={() => {
+          const next = { ...value };
+          if (next[key] === option) delete next[key];
+          else Object.assign(next, { [key]: option });
+          onChange(next);
+        }} style={[styles.chip, value[key] === option && styles.selected]}>
+        <Text style={styles.text}>{LABELS[option]}</Text>
+      </Pressable>)}</View>
+    </View>)}
+    <Pressable accessibilityRole="button" onPress={() => onChange({})} style={styles.toggle}><Text style={styles.hint}>Clear answers</Text></Pressable>
   </View>;
 }
 const styles = StyleSheet.create({

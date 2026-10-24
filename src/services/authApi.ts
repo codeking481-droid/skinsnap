@@ -51,6 +51,7 @@ export async function authenticateWithEmail(
   let response: Response;
   try {
     response = await fetch(endpoint, {
+      signal: AbortSignal.timeout(20000),
       method: 'POST',
       headers: { apikey: anonKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: normalizedEmail, password }),
@@ -73,6 +74,7 @@ export async function authenticateWithEmail(
   let backendResponse: Response;
   try {
     backendResponse = await fetch(`${apiUrl}/v1/session`, {
+      signal: AbortSignal.timeout(20000),
       headers: { Authorization: `Bearer ${values.access_token}` },
     });
   } catch {
@@ -108,6 +110,7 @@ export async function loadAnalysisHistory(): Promise<AnalysisHistoryItem[]> {
   let response: Response;
   try {
     response = await fetch(`${apiUrl}/v1/history`, {
+      signal: AbortSignal.timeout(20000),
       headers: { Authorization: `Bearer ${token}` },
     });
   } catch {
@@ -130,6 +133,7 @@ export async function deleteAccountData(): Promise<void> {
   let identityResponse: Response;
   try {
     identityResponse = await fetch(`${apiUrl}/v1/session`, {
+      signal: AbortSignal.timeout(20000),
       headers: { Authorization: ['Bearer ', token].join('') },
     });
   } catch {
@@ -149,6 +153,7 @@ export async function deleteAccountData(): Promise<void> {
   let response: Response;
   try {
     response = await fetch(`${apiUrl}/v1/account`, {
+      signal: AbortSignal.timeout(20000),
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -184,6 +189,7 @@ export async function signOut(): Promise<void> {
   let response: Response | null = null;
   try {
     response = await fetch(`${supabaseUrl}/auth/v1/logout`, {
+      signal: AbortSignal.timeout(20000),
       method: 'POST',
       headers: { apikey: anonKey, Authorization: `Bearer ${token}` },
     });

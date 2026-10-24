@@ -188,6 +188,7 @@ function getBearerToken(request: Request): string {
 async function authenticate(request: Request, env: Env): Promise<AuthenticatedUser> {
   const token = getBearerToken(request);
   const response = await fetch(`${supabaseUrl(env)}/auth/v1/user`, {
+    signal: AbortSignal.timeout(15000),
     headers: {
       apikey: supabasePublishableKey(env),
       Authorization: `Bearer ${token}`,
@@ -220,19 +221,23 @@ async function databaseRequest(env: Env, path: string, init: RequestInit = {}, o
   try {
     response = await fetch(`${supabaseUrl(env)}/rest/v1/${path}`, {
       ...init,
+      signal: init.signal ?? AbortSignal.timeout(15000),
       headers: { ...supabaseHeaders(env), ...init.headers },
     });
   } catch {
     throw new ApiError(503, 'database-unavailable', 'The secure data service is unavailable. Please try again.');
   }
   if (!response.ok) {
+    const payload: unknown = await response.clone().json().catch(() => null);
     if (optionalDelete && init.method === 'DELETE' && response.status === 404) {
-      const payload: unknown = await response.clone().json().catch(() => null);
       // Optional legacy/new relations may not exist before their additive migration.
       // All other failures remain blocking; Auth is never removed on a partial failure.
       if (isRecord(payload) && payload.code === 'PGRST205') return new Response(null, { status: 204 });
     }
     if (response.status === 409) return response;
+    if (isRecord(payload) && ['PGRST204', 'PGRST205', '42P01', '42703'].includes(String(payload.code))) {
+      throw new ApiError(503, 'database-schema-not-ready', 'The secure data service is missing a required database update.');
+    }
     throw new ApiError(503, 'database-unavailable', 'The secure data service could not complete this request.');
   }
   return response;
@@ -243,6 +248,7 @@ async function hasPremiumEntitlement(env: Env, userId: string): Promise<boolean>
   let response: Response;
   try {
     response = await fetch(`https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(userId)}`, {
+      signal: AbortSignal.timeout(15000),
       headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' },
     });
   } catch {
@@ -749,6 +755,7 @@ async function deleteAccount(env: Env, userId: string): Promise<Response> {
   try {
     response = await fetch(`${supabaseUrl(env)}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
       method: 'DELETE',
+      signal: AbortSignal.timeout(20000),
       headers: { apikey: key, Authorization: `Bearer ${key}` },
     });
   } catch {
@@ -871,7 +878,7 @@ async function route(request: Request, env: Env): Promise<Response> {
 
   const user = await authenticate(request, env);
   if (['/v1/preferences', '/v1/routine/custom', '/v1/diary'].includes(url.pathname) || /^\/v1\/diary\/\d{4}-\d{2}-\d{2}$/.test(url.pathname)) {
-    if (env.RETENTION_ENABLED !== 'true') throw new ApiError(503, 'retention-not-enabled', 'This feature is awaiting its database and server update.');
+    if (env.RETENTION_ENABLED !== 'true') throw new ApiError(503, 'retention-not-enabled', 'Diary and saved preferences are not enabled on this service.');
     return retentionRoute(request, user.id, (path, init) => databaseRequest(env, path, init));
   }
   if (url.pathname === '/v1/profile' && request.method === 'GET') return getProfile(env, user.id);
