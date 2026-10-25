@@ -23,6 +23,11 @@ function fixture(writeGate) {
         setItemAsync: async (key, value) => { if (writeGate && value.startsWith('refreshed')) await writeGate.promise; storage.set(key, value); },
         deleteItemAsync: async key => { storage.delete(key); }, AFTER_FIRST_UNLOCK: 'test',
       };
+      if (name === './sessionStore') return {
+        getSessionValue: async key => storage.get(key) ?? null,
+        setSessionValue: async (key, value) => { if (writeGate && value.startsWith('refreshed')) await writeGate.promise; storage.set(key, value); },
+        deleteSessionValue: async key => { storage.delete(key); },
+      };
       if (name === './billing') return { logOutRevenueCatUser: async () => {}, logInRevenueCatUser: async () => {}, isRevenueCatConfiguredForPlatform: () => false };
       if (name === '../anonymousAuth') return {};
       throw Error('Unexpected module: ' + name);

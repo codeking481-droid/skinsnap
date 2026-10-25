@@ -1,6 +1,8 @@
 import { File, Paths } from 'expo-file-system';
+import { Platform } from 'react-native';
 import { getOnboardingResumeStep } from './flowLogic';
 import { isAdultEligibilityConfirmed } from './privacy';
+import { readBrowserValue, writeBrowserValue } from './platformStorage';
 
 const KEY = 'skinsnap-preferences-v1';
 export type OnboardingStep = 1 | 2 | 3;
@@ -21,6 +23,7 @@ function parsePreferences(raw: string | null): Preferences {
 
 export async function loadPreferences(): Promise<Preferences> {
   try {
+    if (Platform.OS === 'web') return parsePreferences(readBrowserValue(KEY));
     const file = preferencesFile();
     const raw = file.exists ? await file.text() : null;
     return parsePreferences(raw);
@@ -31,6 +34,10 @@ export async function loadPreferences(): Promise<Preferences> {
 
 async function savePreferences(value: Preferences): Promise<void> {
   const raw = JSON.stringify(value);
+  if (Platform.OS === 'web') {
+    writeBrowserValue(KEY, raw);
+    return;
+  }
   const file = preferencesFile();
   if (!file.exists) file.create({ intermediates: true });
   await file.write(raw, { encoding: 'utf8' });

@@ -1,4 +1,4 @@
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Alert } from 'react-native';
 import { AnalysisPreferencesForm } from '../components/AnalysisPreferencesForm';
@@ -34,6 +34,7 @@ export default function SkinPreferencesScreen() {
     <Copy>Tell us what suits you. These are your own reports, not diagnoses or findings inferred from your photo.</Copy>
     <Status>{status}</Status>
     {!ready && <Action label="Retry loading preferences" secondary disabled={busy} onPress={() => setLoadAttempt(attempt => attempt + 1)} />}
+    {!ready && status.includes('Guest access') && <Action label="Sign in or create an account" disabled={busy} onPress={() => router.push('/sign-in')} />}
     {ready && <><AnalysisPreferencesForm extended value={value} onChange={change} />
       <Card><Field label="Country or shopping region · optional" value={value.region ?? ''} maxLength={80} onChangeText={region => change({ ...value, region })} />
         <Field label="Products you use · optional" value={value.products ?? ''} multiline maxLength={400} onChangeText={products => change({ ...value, products })} />

@@ -1,7 +1,7 @@
 import { todayRoutineCompletion } from '../services/routineCompletion';
 import { useCallback, useState } from 'react';
 import { Alert } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { RetentionPage, Card, Copy, Action, Field, Toggle, Status } from '../components/RetentionUI';
 import { FEELINGS, COSMETIC_CONCERNS, diaryWeekSummary, isLocalDate, type DiaryEntry } from '../retention';
 import { loadDiary, saveDiary, deleteDiary, loadDiaryEntry } from '../services/retentionApi';
@@ -59,6 +59,7 @@ export default function SkinDiaryScreen() {
     <Copy>A private record of how your skin feels. These are self-reports, not diagnoses or measurements of improvement. Save only what you are comfortable keeping in your secure profile.</Copy>
     <Status>{status}</Status>
     {!ready && <Action label="Retry loading diary" secondary disabled={busy} onPress={() => setLoadAttempt(attempt => attempt + 1)} />}
+    {!ready && status.includes('Guest access') && <Action label="Sign in or create an account" disabled={busy} onPress={() => router.push('/sign-in')} />}
     {ready && <>
       <Card><Copy>{summary.entries} check-ins this week · Morning completed {summary.morning} times · Evening completed {summary.evening} times.</Copy><Copy>Completion is what you record here. Routine checkmarks are available in Your Routine.</Copy></Card>
       <Field label="Browse date · YYYY-MM-DD" value={date} maxLength={10} onChangeText={setDate} />

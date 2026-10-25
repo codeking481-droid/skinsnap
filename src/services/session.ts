@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import { deleteSessionValue, getSessionValue, setSessionValue } from './sessionStore';
 import { getRevenueCatAppUserId, isRevenueCatConfiguredForPlatform, logInRevenueCatUser, logOutRevenueCatUser } from './billing';
 import {
   AnonymousAuthError,
@@ -32,12 +33,12 @@ export async function getSessionToken(): Promise<string | null> {
 async function readOrRefreshSessionToken(generation: number): Promise<string | null> {
   await storageWrites.catch(() => undefined);
   if (generation !== sessionGeneration) return null;
-  const accessToken = await SecureStore.getItemAsync(SESSION_TOKEN_KEY);
-  const expiryValue = await SecureStore.getItemAsync(SESSION_EXPIRY_KEY);
+  const accessToken = await getSessionValue(SESSION_TOKEN_KEY);
+  const expiryValue = await getSessionValue(SESSION_EXPIRY_KEY);
   const expiresAt = Number(expiryValue);
   if (!accessToken || !Number.isFinite(expiresAt) || Date.now() + 60_000 < expiresAt) return generation === sessionGeneration ? accessToken : null;
 
-  const refreshToken = await SecureStore.getItemAsync(SESSION_REFRESH_TOKEN_KEY);
+  const refreshToken = await getSessionValue(SESSION_REFRESH_TOKEN_KEY);
   const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim().replace(/\/+$/, '');
   const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim();
   if (!refreshToken || !baseUrl?.startsWith('https://') || !anonKey) return generation === sessionGeneration ? accessToken : null;
@@ -59,9 +60,9 @@ async function readOrRefreshSessionToken(generation: number): Promise<string | n
     await writeSession(async () => {
       if (generation !== sessionGeneration) return;
       await Promise.all([
-        SecureStore.setItemAsync(SESSION_TOKEN_KEY, values.access_token as string),
-        SecureStore.setItemAsync(SESSION_REFRESH_TOKEN_KEY, values.refresh_token as string),
-        SecureStore.setItemAsync(SESSION_EXPIRY_KEY, String(nextExpiry)),
+        setSessionValue(SESSION_TOKEN_KEY, values.access_token as string),
+        setSessionValue(SESSION_REFRESH_TOKEN_KEY, values.refresh_token as string),
+        setSessionValue(SESSION_EXPIRY_KEY, String(nextExpiry)),
       ]);
     });
     return generation === sessionGeneration ? values.access_token : null;
@@ -103,7 +104,7 @@ export function sessionFailureMessage(session: Extract<SessionCheck, { valid: fa
 }
 
 export async function isAnonymousSession(): Promise<boolean> {
-  return await SecureStore.getItemAsync(SESSION_ANONYMOUS_KEY) === 'true';
+  return await getSessionValue(SESSION_ANONYMOUS_KEY) === 'true';
 }
 
 export async function verifyAuthenticatedSession(): Promise<SessionCheck> {
@@ -160,7 +161,7 @@ export async function ensureAuthenticatedSession(): Promise<SessionCheck> {
       return session;
     }
 
-    const refreshToken = await SecureStore.getItemAsync(SESSION_REFRESH_TOKEN_KEY);
+    const refreshToken = await getSessionValue(SESSION_REFRESH_TOKEN_KEY);
     if (refreshToken) return { valid: false, reason: 'expired' };
 
     let anonymous;
@@ -232,17 +233,17 @@ async function storeSessionTokens(
   refreshPromise = null;
   await writeSession(async () => {
     if (generation !== sessionGeneration) return;
-    await SecureStore.deleteItemAsync(SESSION_TOKEN_KEY);
+    await deleteSessionValue(SESSION_TOKEN_KEY);
     await Promise.all([
       refreshToken
-        ? SecureStore.setItemAsync(SESSION_REFRESH_TOKEN_KEY, refreshToken)
-        : SecureStore.deleteItemAsync(SESSION_REFRESH_TOKEN_KEY),
+        ? setSessionValue(SESSION_REFRESH_TOKEN_KEY, refreshToken)
+        : deleteSessionValue(SESSION_REFRESH_TOKEN_KEY),
       expiresAt
-        ? SecureStore.setItemAsync(SESSION_EXPIRY_KEY, String(expiresAt))
-        : SecureStore.deleteItemAsync(SESSION_EXPIRY_KEY),
-      SecureStore.setItemAsync(SESSION_ANONYMOUS_KEY, isAnonymous ? 'true' : 'false'),
+        ? setSessionValue(SESSION_EXPIRY_KEY, String(expiresAt))
+        : deleteSessionValue(SESSION_EXPIRY_KEY),
+      setSessionValue(SESSION_ANONYMOUS_KEY, isAnonymous ? 'true' : 'false'),
     ]);
-    await SecureStore.setItemAsync(SESSION_TOKEN_KEY, token, {
+    await setSessionValue(SESSION_TOKEN_KEY, token, {
       keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
     });
   });
@@ -268,9 +269,9 @@ export async function clearSessionToken(): Promise<void> {
   sessionGeneration++;
   refreshPromise = null;
   await writeSession(async () => { await Promise.all([
-    SecureStore.deleteItemAsync(SESSION_TOKEN_KEY),
-    SecureStore.deleteItemAsync(SESSION_REFRESH_TOKEN_KEY),
-    SecureStore.deleteItemAsync(SESSION_EXPIRY_KEY),
-    SecureStore.deleteItemAsync(SESSION_ANONYMOUS_KEY),
+    deleteSessionValue(SESSION_TOKEN_KEY),
+    deleteSessionValue(SESSION_REFRESH_TOKEN_KEY),
+    deleteSessionValue(SESSION_EXPIRY_KEY),
+    deleteSessionValue(SESSION_ANONYMOUS_KEY),
   ]); await logOutRevenueCatUser(); });
 }
