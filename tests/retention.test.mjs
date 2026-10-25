@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSavedPreferences, parseCustomRoutine, parseDiaryEntry, routineFromAnalysis, scheduledSteps, diaryWeekSummary, isLocalDate } from '../src/retention.ts';
+import { parseSavedPreferences, parseCustomRoutine, parseDiaryEntry, restoreDiaryEntry, routineFromAnalysis, scheduledSteps, diaryWeekSummary, isLocalDate } from '../src/retention.ts';
 import { assessCapture } from '../src/smartCapture.ts';
 import { retentionRoute } from '../worker/src/retention.ts';
 import worker from '../worker/src/index.ts';
@@ -46,6 +46,17 @@ test('diary uses explicit calendar dates and factual deduplicated weekly summari
   assert.throws(() => parseDiaryEntry({ ...entry(), timeZone: 'Invalid/Zone' }));
   assert.throws(() => parseDiaryEntry({ ...entry(), feeling: 'cured' }));
   assert.deepEqual(diaryWeekSummary([entry('2026-10-19'), entry('2026-10-20'), entry('2026-10-20'), entry('2026-10-18'), entry('2026-10-25')], '2026-10-24'), { entries: 2, morning: 0, evening: 2 });
+});
+test('older saved diary entries recover missing optional fields without hiding valid notes', () => {
+  const restored = restoreDiaryEntry({ date: '2024-02-29', note: 'Synthetic legacy note', concerns: ['Shine', 'unsupported'] });
+  assert.equal(restored.entry.date, '2024-02-29');
+  assert.equal(restored.entry.note, 'Synthetic legacy note');
+  assert.equal(restored.entry.timeZone, 'UTC');
+  assert.equal(restored.entry.morningCompleted, false);
+  assert.deepEqual(restored.entry.concerns, ['Shine']);
+  assert.equal(restored.recovered, true);
+  assert.throws(() => restoreDiaryEntry({ date: '2026-02-30' }), /invalid-saved-diary-date/);
+  assert.throws(() => restoreDiaryEntry({ date: '2024-02-29', note: 'x'.repeat(601) }), /invalid-saved-diary-field/);
 });
 test('secure retention CRUD scopes every write/read/delete and repeated daily saves upsert', async () => {
   const rows = new Map(); const calls = [];

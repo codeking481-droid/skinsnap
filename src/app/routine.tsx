@@ -22,7 +22,7 @@ import { getRoutineProgressOwner } from '../services/userDataApi';
 import { loadAnalysisHistory, type AnalysisHistoryItem } from '../services/authApi';
 import {
   buildRoutineSteps,
-  filterRoutineGuidance,
+  restoreRoutineGuidance,
   routineTip,
   type RoutinePeriod,
   type RoutineStep,
@@ -57,6 +57,7 @@ export default function RoutineScreen() {
   const [routineId, setRoutineId] = useState<string | undefined>();
   const [owner, setOwner] = useState<string | null>(null);
   const [routine, setRoutine] = useState<RoutineGuidance | null>(demoMode ? DEMO_ROUTINE : null);
+  const [generalRoutine, setGeneralRoutine] = useState(false);
   const [safetyNotice, setSafetyNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(!demoMode);
   const [error, setError] = useState<string | null>(null);
@@ -85,6 +86,7 @@ export default function RoutineScreen() {
     setProgressChanged(false);
     setError(null);
     setRoutine(null);
+    setGeneralRoutine(false);
     setCustomRoutine(null);
     setCustomNotice(null);
     void (async () => {
@@ -127,15 +129,18 @@ export default function RoutineScreen() {
         } else if (!latest) {
           setRoutine(null);
         } else {
-          const morning = filterRoutineGuidance(latest.morningRoutine);
-          const evening = filterRoutineGuidance(latest.eveningRoutine);
-          const precautions = filterRoutineGuidance(latest.precautions);
+          const restored = restoreRoutineGuidance(latest);
           setRoutine({
-            morningRoutine: morning.items,
-            eveningRoutine: evening.items,
-            precautions: precautions.items,
+            morningRoutine: restored.morningRoutine,
+            eveningRoutine: restored.eveningRoutine,
+            precautions: restored.precautions,
           });
-          if (morning.removed || evening.removed || precautions.removed) {
+          setGeneralRoutine(restored.usesGeneralGuidance);
+          if (restored.usesGeneralGuidance) {
+            setSafetyNotice(restored.removedUnsupportedGuidance
+              ? 'Some saved guidance could not be shown. General, non-personalized steps are shown for the missing part of your routine.'
+              : 'No saved steps were available for part of your routine. General, non-personalized steps are shown instead.');
+          } else if (restored.removedUnsupportedGuidance) {
             setSafetyNotice('Some saved guidance was hidden because it did not meet SkinSnap’s non-diagnostic safety standards.');
           } else {
             setSafetyNotice(null);
@@ -211,7 +216,7 @@ export default function RoutineScreen() {
           {demoMode
             ? <Text style={[styles.demoNotice, { fontSize: 10 * scale, marginTop: 4 * scale }]}>DEMO ROUTINE · GENERAL EXAMPLE, NOT PERSONALIZED</Text>
             : routine
-              ? <Text style={[styles.demoNotice, { fontSize: 10 * scale, marginTop: 4 * scale }]}>{customRoutine ? 'YOUR CUSTOM ROUTINE' : 'YOUR SAVED AI-ASSISTED GUIDANCE'} · NON-DIAGNOSTIC</Text>
+              ? <Text style={[styles.demoNotice, { fontSize: 10 * scale, marginTop: 4 * scale }]}>{generalRoutine ? 'GENERAL ROUTINE · NOT PERSONALIZED' : customRoutine ? 'YOUR CUSTOM ROUTINE' : 'YOUR SAVED AI-ASSISTED GUIDANCE'} · NON-DIAGNOSTIC</Text>
               : null}
           <Action secondary label="Edit my routine" onPress={() => router.push('/routine-edit')} />
           <Action secondary label="My Skin Diary" onPress={() => router.push('/skin-diary')} />

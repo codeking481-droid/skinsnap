@@ -43,6 +43,45 @@ export function parseDiaryEntry(v: unknown): DiaryEntry {
   return { date: v.date, timeZone: v.timeZone, ...(v.feeling ? { feeling: v.feeling as DiaryEntry['feeling'] } : {}), note: v.note.trim(),
     products: v.products.trim(), morningCompleted: v.morningCompleted, eveningCompleted: v.eveningCompleted, concerns: [...new Set(v.concerns as string[])] };
 }
+export function restoreDiaryEntry(v: unknown): { entry: DiaryEntry; recovered: boolean } {
+  if (!record(v) || !isLocalDate(v.date)) throw new Error('invalid-saved-diary-date');
+  let recovered = false;
+  const optionalString = (key: 'timeZone' | 'note' | 'products', max: number, fallback: string): string => {
+    const value = v[key];
+    if (value === undefined) { recovered = true; return fallback; }
+    if (!string(value, max)) throw new Error('invalid-saved-diary-field');
+    return value;
+  };
+  let timeZone = optionalString('timeZone', 80, 'UTC');
+  try { new Intl.DateTimeFormat('en', { timeZone }); }
+  catch { timeZone = 'UTC'; recovered = true; }
+  const feeling = v.feeling;
+  if (feeling !== undefined && !(FEELINGS as readonly unknown[]).includes(feeling)) recovered = true;
+  const concernsValue = v.concerns;
+  const concerns = Array.isArray(concernsValue)
+    ? [...new Set(concernsValue.filter((concern): concern is string => (COSMETIC_CONCERNS as readonly unknown[]).includes(concern)))]
+    : [];
+  if (!Array.isArray(concernsValue) || concerns.length !== concernsValue.length) recovered = true;
+  const completion = (key: 'morningCompleted' | 'eveningCompleted') => {
+    const value = v[key];
+    if (value === undefined) { recovered = true; return false; }
+    if (typeof value !== 'boolean') throw new Error('invalid-saved-diary-field');
+    return value;
+  };
+  return {
+    entry: {
+      date: v.date,
+      timeZone,
+      ...(FEELINGS.includes(feeling as typeof FEELINGS[number]) ? { feeling: feeling as DiaryEntry['feeling'] } : {}),
+      note: optionalString('note', 600, '').trim(),
+      products: optionalString('products', 400, '').trim(),
+      morningCompleted: completion('morningCompleted'),
+      eveningCompleted: completion('eveningCompleted'),
+      concerns,
+    },
+    recovered,
+  };
+}
 export function routineFromAnalysis(result: { resultId: string; morningRoutine: string[]; eveningRoutine: string[] }): CustomRoutine {
   return { version: 1, sourceResultId: result.resultId, steps: (['Morning', 'Evening'] as const).flatMap(period =>
     (period === 'Morning' ? result.morningRoutine : result.eveningRoutine).map((text, index) => ({

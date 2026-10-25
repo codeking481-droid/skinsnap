@@ -77,7 +77,7 @@ const OBSERVATION_CATEGORIES = new Set([
   'color-variation',
   'overall-finish',
 ]);
-const RESTRICTED_COSMETIC_LANGUAGE = /\b(diagnos(?:e|is|ed|ing)?|treat(?:ment|s|ed|ing)?|cure[ds]?|prescri(?:be|ption)|eczema|acne|rosacea|infection|skin cancer|medical[- ]grade|antibiotic|steroid|medication|beauty score|attractiveness|guaranteed results?)\b/i;
+const RESTRICTED_COSMETIC_LANGUAGE = /\b(diagnos(?:e|is|ed|ing)?|medical[- ]treatment|cure[ds]?|prescri(?:be|ption)|eczema|acne|rosacea|infection|skin cancer|medical[- ]grade|antibiotic|steroid|medication|beauty score|attractiveness|guaranteed results?)\b/i;
 
 function isSafeCosmeticText(value: string): boolean {
   return !RESTRICTED_COSMETIC_LANGUAGE.test(value);

@@ -122,7 +122,7 @@ export async function loadAnalysisHistory(): Promise<AnalysisHistoryItem[]> {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !Array.isArray((payload as Record<string, unknown>).items)) {
     throw new AuthApiError('The history service returned an invalid response.');
   }
-  return ((payload as { items: unknown[] }).items).map(parseAnalysisResult);
+  return ((payload as { items: unknown[] }).items).map((item) => parseAnalysisResult(item, { savedHistory: true }));
 }
 
 export async function deleteAccountData(): Promise<void> {

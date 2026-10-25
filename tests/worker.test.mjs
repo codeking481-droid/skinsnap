@@ -1083,6 +1083,22 @@ test('unsafe Groq routine guidance is rejected before result persistence', async
   assert.ok(!requests.some((request) => request.url.endsWith('/rest/v1/rpc/complete_skinsnap_analysis')));
 });
 
+test('ordinary cosmetic routine phrasing is not mistaken for medical treatment', async () => {
+  const ordinary = 'Treat yourself to a gentle moisturizer after cleansing.';
+  const { response } = await requestAnalysisWithOutputs({
+    imageQuality: 'clear',
+    summary: 'A clear photo for cautious cosmetic observations.',
+    observations: [{ category: 'visible-shine', observation: 'Some visible shine.', confidence: 'low' }],
+  }, {
+    morningRoutine: [ordinary],
+    eveningRoutine: ['Cleanse gently and apply moisturizer.'],
+    precautions: ['Follow product labels.'],
+  });
+  assert.equal(response.status, 201);
+  const result = await response.json();
+  assert.equal(result.morningRoutine[0], ordinary);
+});
+
 test('account deletion targets only the Supabase-authenticated user', async () => {
   const originalFetch = globalThis.fetch;
   const requests = [];

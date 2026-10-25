@@ -17,13 +17,19 @@ export default function SkinDiaryScreen() {
   const [entry, setEntry] = useState<DiaryEntry>(() => blank());
   const [checkmarks, setCheckmarks] = useState<{ morning: boolean; evening: boolean } | null>(null);
   const [ready, setReady] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('Loading your private diary...');
   const [date, setDate] = useState(localDayKey());
-  useFocusEffect(useCallback(() => { let active = true; setReady(false); setEntries([]); setDirty(false); setCheckmarks(null); void todayRoutineCompletion().then(value => { if (active) setCheckmarks(value); }).catch(() => { if (active) setCheckmarks(null); }); void loadDiary().then(items => {
-    if (!active) return; setEntries(items); const today = localDayKey(); setDate(today); setEntry(items.find(e => e.date === today) ?? blank(today)); setDirty(false); setReady(true); setStatus('Your own check-in. No AI analysis or quota is used.');
-  }).catch(e => { if (active) setStatus(e.message); }); return () => { active = false; }; }, []));
+  useFocusEffect(useCallback(() => { let active = true; setReady(false); setEntries([]); setDirty(false); setCheckmarks(null); setStatus(loadAttempt ? 'Retrying your private diary...' : 'Loading your private diary...'); void todayRoutineCompletion().then(value => { if (active) setCheckmarks(value); }).catch(() => { if (active) setCheckmarks(null); }); void loadDiary().then(({ entries: savedEntries, recovered, skipped }) => {
+    if (!active) return; setEntries(savedEntries); const today = localDayKey(); setDate(today); setEntry(savedEntries.find(e => e.date === today) ?? blank(today)); setDirty(false); setReady(true);
+    setStatus(skipped
+      ? `${skipped} saved ${skipped === 1 ? 'entry was' : 'entries were'} skipped because the data could not be read safely. ${recovered ? `${recovered} older ${recovered === 1 ? 'entry was' : 'entries were'} restored with missing optional fields left blank.` : ''}`
+      : recovered
+        ? `${recovered} older ${recovered === 1 ? 'entry was' : 'entries were'} restored with missing optional fields left blank.`
+        : 'Your own check-in. No AI analysis or quota is used.');
+  }).catch(e => { if (active) setStatus(e instanceof Error ? e.message : 'Your private diary could not be loaded.'); }); return () => { active = false; }; }, [loadAttempt]));
   const change = (value: Partial<DiaryEntry>) => { setEntry(current => ({ ...current, ...value })); setDirty(true); };
   const select = (next: string) => {
     if (!isLocalDate(next) || next > localDayKey()) { setStatus('Choose today or an earlier date in YYYY-MM-DD format.'); return; }
@@ -52,6 +58,7 @@ export default function SkinDiaryScreen() {
   return <RetentionPage locked={busy} title="My Skin Diary" onBack={leave}>
     <Copy>A private record of how your skin feels. These are self-reports, not diagnoses or measurements of improvement. Save only what you are comfortable keeping in your secure profile.</Copy>
     <Status>{status}</Status>
+    {!ready && <Action label="Retry loading diary" secondary disabled={busy} onPress={() => setLoadAttempt(attempt => attempt + 1)} />}
     {ready && <>
       <Card><Copy>{summary.entries} check-ins this week · Morning completed {summary.morning} times · Evening completed {summary.evening} times.</Copy><Copy>Completion is what you record here. Routine checkmarks are available in Your Routine.</Copy></Card>
       <Field label="Browse date · YYYY-MM-DD" value={date} maxLength={10} onChangeText={setDate} />

@@ -4,9 +4,24 @@ import {
   buildRoutineSteps,
   filterRoutineGuidance,
   isSafeCosmeticText,
+  parseRoutineGuidance,
+  restoreRoutineGuidance,
   routineStepIds,
   routineTip,
 } from '../src/routinePresentation.ts';
+
+test('routine guidance allows ordinary cosmetic wording and filters unsupported saved entries safely', () => {
+  const ordinary = 'Treat yourself to a gentle moisturizer after cleansing.';
+  assert.equal(isSafeCosmeticText(ordinary), true);
+  assert.deepEqual(parseRoutineGuidance([ordinary], false), [ordinary]);
+  assert.throws(() => parseRoutineGuidance(['This diagnoses eczema.'], false), /invalid-routine-guidance/);
+  assert.deepEqual(parseRoutineGuidance([
+    ordinary,
+    'This diagnoses eczema.',
+    null,
+  ], true), [ordinary]);
+  assert.deepEqual(parseRoutineGuidance(['This diagnoses eczema.'], true), []);
+});
 
 test('builds routine steps dynamically and derives only details present in saved text', () => {
   const morning = buildRoutineSteps([
@@ -47,6 +62,19 @@ test('medical or diagnostic recommendations are removed and surfaced for safety 
   assert.deepEqual(filterRoutineGuidance(['Patch test new products.']), {
     items: ['Patch test new products.'],
     removed: false,
+  });
+
+  test('saved routine restores a clearly general fallback only when a period has no supported steps', () => {
+    const routine = restoreRoutineGuidance({
+      morningRoutine: ['This diagnoses acne.'],
+      eveningRoutine: ['Cleanse gently and moisturize.'],
+      precautions: [],
+    });
+    assert.equal(routine.usesGeneralGuidance, true);
+    assert.equal(routine.removedUnsupportedGuidance, true);
+    assert.match(routine.morningRoutine[0], /lukewarm water/);
+    assert.deepEqual(routine.eveningRoutine, ['Cleanse gently and moisturize.']);
+    assert.equal(routine.precautions.length, 1);
   });
 
   test('cosmetic text validator rejects medical, beauty-score, and guaranteed-outcome claims', () => {

@@ -12,7 +12,7 @@ import {
 import { getVerifiedEntitlement } from './billing';
 import { ensureAuthenticatedSession, getSessionToken, sessionFailureMessage, verifyAuthenticatedSession } from './session';
 import { isAnalysisResponseAllowed } from '../subscriptionRules';
-import { isSafeCosmeticText } from '../routinePresentation';
+import { isSafeCosmeticText, parseRoutineGuidance } from '../routinePresentation';
 import { runAnalysisOnce } from '../analysisRequestRegistry';
 import { parseAnalysisQuality, parseAnalysisPreferences, parseObservationEvidence, type AnalysisPreferences, type AnalysisQuality, type ObservationEvidence } from '../analysisQuality';
 import {
@@ -161,7 +161,10 @@ async function readServiceErrorCode(response: Response): Promise<string> {
   }
 }
 
-export function parseAnalysisResult(value: unknown): SkinAnalysisResult {
+export function parseAnalysisResult(
+  value: unknown,
+  options: { savedHistory?: boolean } = {},
+): SkinAnalysisResult {
   if (!isRecord(value)
     || !isShortText(value.resultId, 128)
     || !isShortText(value.createdAt, 64)
@@ -172,10 +175,10 @@ export function parseAnalysisResult(value: unknown): SkinAnalysisResult {
     || !Array.isArray(value.observations)
     || value.observations.length > 12
     || !Array.isArray(value.morningRoutine)
-    || value.morningRoutine.length === 0
+    || (!options.savedHistory && value.morningRoutine.length === 0)
     || value.morningRoutine.length > 8
     || !Array.isArray(value.eveningRoutine)
-    || value.eveningRoutine.length === 0
+    || (!options.savedHistory && value.eveningRoutine.length === 0)
     || value.eveningRoutine.length > 8
     || !Array.isArray(value.precautions)
     || value.precautions.length > 8) {
@@ -201,12 +204,13 @@ export function parseAnalysisResult(value: unknown): SkinAnalysisResult {
       confidence: item.confidence as SkinObservation['confidence'],
     };
   });
-  const readGuidance = (list: unknown[]): string[] => list.map((item) => {
-    if (!isShortText(item, 240) || !isSafeCosmeticText(item)) {
+  const readGuidance = (list: unknown[]): string[] => {
+    try {
+      return parseRoutineGuidance(list, options.savedHistory === true);
+    } catch {
       throw new AnalysisRequestError('invalid-response', 'The analysis service returned unsupported guidance.');
     }
-    return item;
-  });
+  };
 
   let quality: AnalysisQuality;
   try { quality = parseAnalysisQuality(value, isSafeCosmeticText); }

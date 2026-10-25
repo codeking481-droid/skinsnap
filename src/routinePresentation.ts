@@ -10,10 +10,25 @@ export type RoutineStep = {
   frequency: string;
 };
 
-const MEDICAL_OR_DIAGNOSTIC_LANGUAGE = /\b(diagnos(?:e|is|ed|ing)?|treat(?:ment|s|ed|ing)?|cure[ds]?|prescri(?:be|ption)|eczema|acne|rosacea|infection|skin cancer|medical[- ]grade|antibiotic|steroid|medication|beauty score|attractiveness|guaranteed results?)\b/i;
+const MEDICAL_OR_DIAGNOSTIC_LANGUAGE = /\b(diagnos(?:e|is|ed|ing)?|medical[- ]treatment|cure[ds]?|prescri(?:be|ption)|eczema|acne|rosacea|infection|skin cancer|medical[- ]grade|antibiotic|steroid|medication|beauty score|attractiveness|guaranteed results?)\b/i;
 
 export function isSafeCosmeticText(text: string): boolean {
   return !MEDICAL_OR_DIAGNOSTIC_LANGUAGE.test(text);
+}
+
+export function parseRoutineGuidance(value: unknown, tolerateUnsupported = false): string[] {
+  if (!Array.isArray(value) || value.length > 8 || (!tolerateUnsupported && value.length === 0)) {
+    throw new Error('invalid-routine-guidance');
+  }
+  const supported: string[] = [];
+  for (const item of value) {
+    if (typeof item === 'string' && item.trim().length > 0 && item.length <= 240 && isSafeCosmeticText(item)) {
+      supported.push(item);
+    } else if (!tolerateUnsupported) {
+      throw new Error('invalid-routine-guidance');
+    }
+  }
+  return supported;
 }
 
 const CATEGORY_HINTS: [RegExp, string][] = [
@@ -71,6 +86,37 @@ export function filterRoutineGuidance(guidance: readonly string[]): { items: str
     && item.trim().length > 0
     && isSafeCosmeticText(item));
   return { items, removed: items.length !== guidance.length };
+}
+
+export function restoreRoutineGuidance(
+  guidance: { morningRoutine: readonly string[]; eveningRoutine: readonly string[]; precautions: readonly string[] },
+): {
+  morningRoutine: string[];
+  eveningRoutine: string[];
+  precautions: string[];
+  usesGeneralGuidance: boolean;
+  removedUnsupportedGuidance: boolean;
+} {
+  const morning = filterRoutineGuidance(guidance.morningRoutine);
+  const evening = filterRoutineGuidance(guidance.eveningRoutine);
+  const precautions = filterRoutineGuidance(guidance.precautions);
+  const usesGeneralGuidance = morning.items.length === 0 || evening.items.length === 0;
+  return {
+    morningRoutine: morning.items.length ? morning.items : [
+      'Rinse gently with lukewarm water.',
+      'Apply a moisturizer that suits your skin.',
+      'Use broad-spectrum sunscreen as directed on its label.',
+    ],
+    eveningRoutine: evening.items.length ? evening.items : [
+      'Cleanse gently to remove sunscreen and daily buildup.',
+      'Apply a moisturizer that suits your skin.',
+    ],
+    precautions: precautions.items.length ? precautions.items : [
+      'Introduce products one at a time, follow their labels, and stop use if irritation occurs.',
+    ],
+    usesGeneralGuidance,
+    removedUnsupportedGuidance: morning.removed || evening.removed || precautions.removed,
+  };
 }
 
 export function routineTip(
