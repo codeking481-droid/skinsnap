@@ -1,6 +1,6 @@
 # SkinSnap legal-site review candidate
 
-The responsive static pages in this directory are review drafts, not published legal policies. The 18+ minimum age is confirmed and enforced by the mobile app. The public support/privacy email and legal approval are still missing, so public deployment and Play Console use are blocked.
+The responsive static pages in this directory are review drafts, not published legal policies. The app uses a self-confirmed 18+ gate and requires an adult-eligibility assertion for analysis requests; this is not independent age verification. No date of birth or parental-consent flow is used, and a 16+ waitlist service is not configured. The public support/privacy email and legal approval are still missing, so public deployment and Play Console use are blocked.
 
 Build a local staging copy without installing dependencies:
 

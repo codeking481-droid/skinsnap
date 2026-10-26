@@ -2,6 +2,8 @@ import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
 import type { CustomerInfo, PurchasesPackage } from 'react-native-purchases';
 import {
+  DEFAULT_OFFERING_ID,
+  DOWNSELL_OFFERING_ID,
   hasVerifiedActiveEntitlement,
   isProductWithoutIntro,
   productMatches,
@@ -83,9 +85,13 @@ function packageFor(
   packages: PurchasesPackage[],
   plan: SubscriptionPlan,
 ): PurchasesPackage | undefined {
-  const period = plan === 'weekly' ? 'weekly' : 'yearly';
+  const period = plan === 'weekly' ? 'weekly' : plan === 'monthly' ? 'monthly' : 'yearly';
   return packages.find((item) => productMatches(item.product.identifier, SUBSCRIPTION_PRODUCTS[plan])
-    && isProductWithoutIntro(item.product, period));
+    && isProductWithoutIntro(item.product, period)
+    && Number.isFinite(item.product.price)
+    && item.product.price > 0
+    && Boolean(item.product.currencyCode.trim())
+    && Boolean(item.product.priceString.trim()));
 }
 
 export async function loadBillingState(includeDownsell = false): Promise<BillingState> {
@@ -99,17 +105,19 @@ export async function loadBillingState(includeDownsell = false): Promise<Billing
   try {
     const Purchases = await getConfiguredSdk();
     const offerings = await Purchases.getOfferings();
-    const current = offerings.all.default ?? offerings.current;
+    const current = offerings.all[DEFAULT_OFFERING_ID] ?? offerings.current;
     if (!current) return { kind: 'error', message: 'Subscription products are unavailable from the store right now.' };
 
     const packages: Partial<Record<SubscriptionPlan, PurchasesPackage>> = {};
     const weekly = packageFor(current.availablePackages, 'weekly');
+    const monthly = packageFor(current.availablePackages, 'monthly');
     const yearly = packageFor(current.availablePackages, 'yearly');
     if (weekly) packages.weekly = weekly;
+    if (monthly) packages.monthly = monthly;
     if (yearly) packages.yearly = yearly;
 
     if (includeDownsell) {
-      const exclusiveOffering = offerings.all.yearly_downsell;
+      const exclusiveOffering = offerings.all[DOWNSELL_OFFERING_ID];
       const downsell = exclusiveOffering
         ? packageFor(exclusiveOffering.availablePackages, 'yearlyDownsell')
         : undefined;

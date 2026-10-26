@@ -12,15 +12,16 @@ function declaration(file, name) {
   visit(ast); assert.ok(found); return 'const ' + found.getText(ast) + ';';
 }
 const compile = s => ts.transpileModule(s, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
-test('opening an older diary entry makes its existing delete and discard controls available', async () => {
-  const saved = { date: '2024-02-29', note: 'Synthetic fixture' }; let cached = []; let selected;
-  const select = vm.runInNewContext(compile(declaration('../src/app/skin-diary.tsx', 'select')) + '\nselect', {
-    busy: false, dirty: false, entries: [], isLocalDate: () => true, localDayKey: () => '2026-10-24',
-    loadDiaryEntry: async () => saved, setEntries: fn => { cached = fn(cached); }, setEntry: e => { selected = e; },
-    setDate: () => {}, setDirty: () => {}, setStatus: () => {}, setBusy: () => {}, blank: () => { throw Error('must not replace saved data'); },
+test('opening an older diary entry loads it in the editor with its delete action', async () => {
+  const saved = { date: '2024-02-29', note: 'Synthetic fixture', concerns: [] }; let selected; let visible = false;
+  const openEditor = vm.runInNewContext(compile(declaration('../src/app/skin-diary.tsx', 'openEditor')) + '\nopenEditor', {
+    selectedDate: '2026-10-24', entries: [saved], setDraft: entry => { selected = entry; }, setEditorVisible: value => { visible = value; }, setEditorStatus: () => {},
+    blank: () => { throw Error('must not replace saved data'); },
   });
-  select('2024-02-29'); await new Promise(setImmediate);
-  assert.equal(selected, saved); assert.equal(cached[0], saved); assert.equal(cached.some(e => e.date === selected.date), true);
+  openEditor('2024-02-29');
+  assert.equal(selected.date, saved.date); assert.equal(selected.note, saved.note); assert.equal(visible, true);
+  const source = fs.readFileSync(new URL('../src/app/skin-diary.tsx', import.meta.url), 'utf8');
+  assert.match(source, /entries\.some\(item => item\.date === draft\.date\).*Delete check-in/s);
 });
 test('paywall legal actions do not open unverified environment URLs', async () => {
   const routes = [];

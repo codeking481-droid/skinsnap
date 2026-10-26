@@ -14,7 +14,7 @@ import {
   View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AuthApiError, authenticateWithEmail, deleteAccountData, signOut } from '../services/authApi';
 import { isAnonymousSession, verifyAuthenticatedSession } from '../services/session';
@@ -22,6 +22,8 @@ import { usePhoto } from '../PhotoContext';
 import { MINIMUM_USER_AGE } from '../privacy';
 
 export default function SignInScreen() {
+  const { continueScan: continueScanParam } = useLocalSearchParams<{ continueScan?: string }>();
+  const continueScan = continueScanParam === 'true';
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { setPhotoUri, setPhotoUploadConsent, setAnalysisResult, setAnalysisPreferences } = usePhoto();
@@ -48,7 +50,7 @@ export default function SignInScreen() {
 
   const returnToPreviousScreen = () => {
     if (router.canGoBack()) router.back();
-    else router.replace('/routine');
+    else router.replace(continueScan ? '/analysis' : '/routine');
   };
 
   const submit = async () => {
@@ -65,10 +67,12 @@ export default function SignInScreen() {
         setMessage('Check your email to confirm your account, then sign in here.');
         setMode('sign-in');
       } else {
-        setPhotoUri(null);
-        setPhotoUploadConsent(false);
+        if (!continueScan) {
+          setPhotoUri(null);
+          setPhotoUploadConsent(false);
+          setAnalysisPreferences({});
+        }
         setAnalysisResult(null);
-        setAnalysisPreferences({});
         setSignedIn(true);
         setAnonymousSession(false);
         setPassword('');
@@ -163,7 +167,7 @@ export default function SignInScreen() {
 
   return (
     <View style={styles.screen}>
-      <LinearGradient colors={['#130A12', '#09080D', '#050509']} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={['#171512', '#0A0A0A', '#050509']} style={StyleSheet.absoluteFill} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={[styles.scroll, { minHeight: height }]} keyboardShouldPersistTaps="handled">
           <View style={[styles.page, { width: Math.min(width, 520), paddingHorizontal: 24 * scale, paddingTop: Math.max(insets.top, 22 * scale), paddingBottom: Math.max(insets.bottom, 24 * scale) }]}>
@@ -171,16 +175,18 @@ export default function SignInScreen() {
               <Text style={styles.backGlyph}>‹</Text>
             </Pressable>
             <View style={styles.brandBlock}>
-              <Text style={[styles.brand, { fontSize: 21 * scale }]}>Skin<Text style={styles.pink}>Snap</Text></Text>
+              <Text style={[styles.brand, { fontSize: 21 * scale }]}>Skin<Text style={styles.accent}>Snap</Text></Text>
               <Text style={[styles.title, { fontSize: 28 * scale, lineHeight: 34 * scale, marginTop: 25 * scale }]}>
-                {signedIn ? 'Your account' : mode === 'sign-in' ? 'Welcome back' : 'Create your account'}
+                {signedIn ? 'Your account' : continueScan ? 'Sign in to continue your scan' : mode === 'sign-in' ? 'Welcome back' : 'Create your account'}
               </Text>
               <Text style={[styles.subtitle, { fontSize: 13 * scale, lineHeight: 20 * scale, marginTop: 8 * scale }]}>
                 {signedIn
                   ? anonymousSession
                     ? 'Your secure guest profile keeps account-scoped data private on this installation.'
                     : 'Manage your secure SkinSnap account and saved data.'
-                  : 'An email account is optional. Continue exploring without registration, or sign in to an existing account.'}
+                  : continueScan
+                    ? 'Your selected photo stays on this device. After signing in, return to analysis and retry; the photo is not uploaded until you retry.'
+                    : 'An email account is optional. Continue exploring without registration, or sign in to an existing account.'}
               </Text>
             </View>
 
@@ -190,7 +196,7 @@ export default function SignInScreen() {
                   Guest recovery by email is not enabled. Clearing app data or reinstalling may make this profile and its saved history inaccessible. Use account deletion before leaving this profile if you want its configured server records removed.
                 </Text>}
                 <Pressable accessibilityRole="button" disabled={busy} onPress={() => void leaveAccount()} style={[styles.primary, { minHeight: 53 * scale, borderRadius: 28 * scale, opacity: busy ? 0.6 : 1 }]}>
-                  <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}>
+                  <LinearGradient colors={['#E8C9A0', '#D4B896']} style={styles.buttonFill}>
                     {busy ? <ActivityIndicator color="#12070C" /> : <Text style={styles.primaryText}>Sign out</Text>}
                   </LinearGradient>
                 </Pressable>
@@ -254,7 +260,7 @@ export default function SignInScreen() {
                   </View>
                 )}
                 <Pressable accessibilityRole="button" disabled={busy} onPress={() => void submit()} style={[styles.primary, { minHeight: 53 * scale, borderRadius: 28 * scale, marginTop: 24 * scale, opacity: busy ? 0.6 : 1 }]}>
-                  <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}>
+                  <LinearGradient colors={['#E8C9A0', '#D4B896']} style={styles.buttonFill}>
                     {busy ? <ActivityIndicator color="#12070C" /> : <Text style={styles.primaryText}>{mode === 'sign-in' ? 'Sign in' : 'Create account'}</Text>}
                   </LinearGradient>
                 </Pressable>
@@ -278,7 +284,7 @@ export default function SignInScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#050509' },
+  screen: { flex: 1, backgroundColor: '#0A0A0A' },
   flex: { flex: 1 },
   scroll: { flexGrow: 1, alignItems: 'center' },
   page: { flexGrow: 1 },
@@ -286,27 +292,27 @@ const styles = StyleSheet.create({
   backGlyph: { color: '#FFF', fontSize: 38, lineHeight: 42, fontFamily: 'InterRegular' },
   brandBlock: { alignItems: 'center', marginTop: 22 },
   brand: { color: '#FFF', fontFamily: 'InterExtraBold', letterSpacing: -0.7 },
-  pink: { color: '#FF6395' },
+  accent: { color: '#E8C9A0' },
   title: { color: '#FFF', fontFamily: 'InterExtraBold', textAlign: 'center', letterSpacing: -0.55 },
-  subtitle: { color: '#D0CAD4', fontFamily: 'InterRegular', textAlign: 'center', maxWidth: 340 },
+  subtitle: { color: '#BDBABD', fontFamily: 'InterRegular', textAlign: 'center', maxWidth: 340 },
   form: { width: '100%' },
-  inputLabel: { color: '#F3EAF0', fontFamily: 'InterSemibold', fontSize: 12 },
-  input: { width: '100%', paddingHorizontal: 15, backgroundColor: '#17131A', borderColor: '#4B3542', borderWidth: 1, color: '#FFF', fontFamily: 'InterRegular', fontSize: 14 },
-  primary: { width: '100%', overflow: 'hidden', borderWidth: 0.8, borderColor: '#FFA7C1' },
+  inputLabel: { color: '#E8C9A0', fontFamily: 'InterSemibold', fontSize: 12 },
+  input: { width: '100%', paddingHorizontal: 15, backgroundColor: '#1A1A1C', borderColor: '#534738', borderWidth: 1, color: '#FFF', fontFamily: 'InterRegular', fontSize: 14 },
+  primary: { width: '100%', overflow: 'hidden', borderWidth: 0.8, borderColor: '#E8C9A0' },
   buttonFill: { flex: 1, minHeight: 52, alignItems: 'center', justifyContent: 'center' },
   primaryText: { color: '#12070C', fontFamily: 'InterExtraBold', fontSize: 15 },
   switchMode: { minHeight: 48, alignItems: 'center', justifyContent: 'center' },
-  switchText: { color: '#FF9FBA', fontFamily: 'InterSemibold', fontSize: 12, textAlign: 'center' },
-  deleteButton: { alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#8A4259', backgroundColor: 'rgba(62,21,36,0.42)' },
-  deleteText: { color: '#FFB3C6', fontFamily: 'InterSemibold', fontSize: 13 },
-  message: { color: '#FFD4E0', fontFamily: 'InterMedium', fontSize: 12, lineHeight: 18, textAlign: 'center' },
-  note: { color: '#A69EAA', fontFamily: 'InterRegular', fontSize: 10, lineHeight: 15, textAlign: 'center' },
+  switchText: { color: '#E8C9A0', fontFamily: 'InterSemibold', fontSize: 12, textAlign: 'center' },
+  deleteButton: { alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#534738', backgroundColor: '#1A1A1C' },
+  deleteText: { color: '#E8C9A0', fontFamily: 'InterSemibold', fontSize: 13 },
+  message: { color: '#E8C9A0', fontFamily: 'InterMedium', fontSize: 12, lineHeight: 18, textAlign: 'center' },
+  note: { color: '#8A8A8A', fontFamily: 'InterRegular', fontSize: 10, lineHeight: 15, textAlign: 'center' },
   ageConfirmation: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 18 },
-  ageCheckbox: { width: 22, height: 22, borderRadius: 5, borderWidth: 1, borderColor: '#9F778B', alignItems: 'center', justifyContent: 'center' },
-  ageCheckboxSelected: { backgroundColor: '#FF8FB2', borderColor: '#FF8FB2' },
+  ageCheckbox: { width: 22, height: 22, borderRadius: 5, borderWidth: 1, borderColor: '#534738', alignItems: 'center', justifyContent: 'center' },
+  ageCheckboxSelected: { backgroundColor: '#D4B896', borderColor: '#E8C9A0' },
   ageCheckmark: { color: '#12070C', fontFamily: 'InterExtraBold', fontSize: 15, lineHeight: 19 },
-  ageText: { color: '#E7DCE4', fontFamily: 'InterRegular', fontSize: 12, flex: 1 },
+  ageText: { color: '#D1D1D1', fontFamily: 'InterRegular', fontSize: 12, flex: 1 },
   legalLinks: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 10 },
-  legalLink: { color: '#FF9FBA', fontFamily: 'InterSemibold', fontSize: 12, textDecorationLine: 'underline' },
-  legalDivider: { color: '#9F8995', fontSize: 12 },
+  legalLink: { color: '#E8C9A0', fontFamily: 'InterSemibold', fontSize: 12, textDecorationLine: 'underline' },
+  legalDivider: { color: '#8A8A8A', fontSize: 12 },
 });

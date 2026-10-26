@@ -10,7 +10,6 @@ export type RoutineProgress = {
 };
 
 const STORAGE_KEY = 'skinsnap-routine-progress-v1';
-const EMPTY: RoutineProgress = { checkedSteps: [], completedDays: [] };
 function routineFile(scope?: string) {
   return new File(Paths.document, `${routineStorageKey(scope)}.json`);
 }
@@ -21,17 +20,32 @@ function routineStorageKey(scope?: string): string {
 }
 
 export async function loadRoutineProgress(scope?: string, routineId?: string): Promise<RoutineProgress> {
+  const raw = Platform.OS === 'web'
+    ? readBrowserValue(routineStorageKey(scope))
+    : await readRoutineFile(scope);
+  if (raw === null) return { checkedSteps: [], completedDays: [] };
+  let data: unknown;
   try {
-    const raw = Platform.OS === 'web'
-      ? readBrowserValue(routineStorageKey(scope))
-      : await readRoutineFile(scope);
-    if (!raw) return EMPTY;
-    const data = JSON.parse(raw);
-    const progress = sanitizeRoutineProgress(data);
-    return { ...progress, checkedSteps: restoreCheckedSteps(progress.checkedSteps, data.checkedOn, localDayKey(), data.routineId, routineId) };
+    data = JSON.parse(raw);
   } catch {
-    return EMPTY;
+    throw new Error('Saved routine progress could not be read because the stored data is invalid.');
   }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('Saved routine progress could not be read because the stored data is invalid.');
+  }
+  const record = data as Record<string, unknown>;
+  if (!Array.isArray(record.checkedSteps) || !Array.isArray(record.completedDays)) {
+    throw new Error('Saved routine progress could not be read because required progress data is missing.');
+  }
+  const progress = sanitizeRoutineProgress(record);
+  if (progress.checkedSteps.length !== new Set(record.checkedSteps).size
+    || progress.completedDays.length !== new Set(record.completedDays).size) {
+    throw new Error('Saved routine progress contains unsupported entries and was not changed.');
+  }
+  return {
+    ...progress,
+    checkedSteps: restoreCheckedSteps(progress.checkedSteps, record.checkedOn, localDayKey(), record.routineId, routineId),
+  };
 }
 
 export async function saveRoutineProgress(progress: RoutineProgress, scope?: string, routineId?: string): Promise<void> {

@@ -35,17 +35,15 @@ async function requestAnalysisWithOutputs(visionResult, groqResult = null, optio
       if (providerResponse) return providerResponse;
       const responseResult = visionResult && typeof visionResult === 'object' && !Array.isArray(visionResult)
         ? {
-          analysisUsable: true,
-          ...visionResult,
-          observations: Array.isArray(visionResult.observations) ? visionResult.observations.map((item) => ({
-            title: 'Visible feature',
-            location: 'Visible skin area',
-            visibility: 'possibly-visible',
-            limitation: 'Photo detail and lighting can affect this observation.',
-            whyItMatters: 'This describes a cosmetic feature visible in the photo.',
-            practicalSuggestion: 'Choose gentle products and follow their labels.',
-            ...item,
+          imageQuality: visionResult.imageQuality,
+          observations: Array.isArray(visionResult.observations) ? visionResult.observations.map(item => ({
+            category: item.category,
+            description: item.description ?? item.observation,
+            confidence: item.confidence === 'moderate' ? 'medium' : item.confidence,
           })) : visionResult.observations,
+          cosmeticInsights: visionResult.cosmeticInsights ?? [],
+          skinAgeEstimate: Object.hasOwn(visionResult, 'skinAgeEstimate') ? visionResult.skinAgeEstimate : null,
+          disclaimer: 'Cosmetic tracking only, not medical diagnosis',
         }
         : visionResult;
       return new Response(JSON.stringify({
@@ -74,7 +72,9 @@ async function requestAnalysisWithOutputs(visionResult, groqResult = null, optio
       headers: {
         Authorization: 'Bearer privacy-test-token',
         'Idempotency-Key': 'privacy-output-test',
+        ...(options.ageEligibility === false ? {} : { 'X-SkinSnap-Adult-Eligibility': '18+' }),
         ...(options.preferences ? { 'X-SkinSnap-Preferences': JSON.stringify(options.preferences) } : {}),
+        ...(options.captureView ? { 'X-SkinSnap-Capture-View': options.captureView } : {}),
       },
       body: form,
     }), {
@@ -91,6 +91,105 @@ async function requestAnalysisWithOutputs(visionResult, groqResult = null, optio
     console.warn = originalWarn;
   }
 }
+
+test('analysis returns cosmetic tiers only when observations support them and saves an estimate', async () => {
+  const { response } = await requestAnalysisWithOutputs({
+    imageQuality: 'clear',
+    summary: 'The photo supports a limited cosmetic review.',
+    observations: [{ category: 'apparent-dryness', observation: 'Dry-looking areas are visible on the cheeks.', confidence: 'low', visibility: 'clearly-visible' }],
+    cosmeticInsights: [{ category: 'hydration', tier: 'Balanced' }],
+    skinAgeEstimate: { value: 22, label: 'estimated' },
+  }, {
+    morningRoutine: ['Use a gentle cleanser.'],
+    eveningRoutine: ['Use a gentle cleanser.'],
+    precautions: [],
+  });
+
+  assert.equal(response.status, 201, JSON.stringify(await response.clone().json()));
+  const result = await response.json();
+  assert.deepEqual(result.cosmeticInsights, [{ category: 'hydration', tier: 'Balanced' }]);
+  assert.deepEqual(result.skinAgeEstimate, { value: 22, label: 'estimated' });
+  assert.equal(result.disclaimer, 'Cosmetic tracking only, not medical diagnosis');
+  assert.equal(result.captureView, 'front');
+  assert.equal(result.observations[0].category, 'apparent-dryness');
+});
+
+test('analysis rejects requests without adult eligibility before processing photo data', async () => {
+  const { response, requests } = await requestAnalysisWithOutputs({
+    imageQuality: 'clear',
+    observations: [],
+    cosmeticInsights: [],
+    skinAgeEstimate: null,
+  }, null, { ageEligibility: false });
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error, 'adult-eligibility-required');
+  assert.equal(requests.some(request => request.url.includes('api.groq.com')), false);
+  assert.equal(requests.some(request => request.url.includes('reserve_skinsnap_analysis')), false);
+});
+
+test('vision parser tolerates legacy optional fields and normalizes the cosmetic response', async () => {
+  const visionOutput = {
+    analysisUsable: true,
+    imageQuality: 'clear',
+    summary: 'A neutral description of the visible finish.',
+    observations: [{
+      category: 'general-texture',
+      observation: 'A little visible texture on the cheeks.',
+      confidence: 'moderate',
+      title: 'Visible texture',
+      location: 'Cheek area',
+      visibility: 'clearly-visible',
+      limitation: 'Lighting can affect the visible detail.',
+    }],
+  };
+  const visionResponse = new Response(JSON.stringify({
+    choices: [{ message: { content: `\`\`\`json\n${JSON.stringify(visionOutput)}\n\`\`\`` } }],
+  }), { status: 200 });
+  const { response } = await requestAnalysisWithOutputs(null, {
+    morningRoutine: ['Use a gentle cleanser.'],
+    eveningRoutine: ['Use a gentle cleanser.'],
+    precautions: [],
+  }, { visionResponses: [visionResponse] });
+  assert.equal(response.status, 201, JSON.stringify(await response.clone().json()));
+  const result = await response.json();
+  assert.deepEqual(result.cosmeticInsights, []);
+  assert.equal(result.skinAgeEstimate, null);
+  assert.equal(result.disclaimer, 'Cosmetic tracking only, not medical diagnosis');
+  assert.equal(result.summary, visionOutput.summary);
+  assert.equal(result.observations[0].observation, visionOutput.observations[0].observation);
+  assert.equal(result.observations[0].confidence, 'moderate');
+});
+
+test('analysis drops unverified optional tiers and age estimates without discarding valid observations', async () => {
+  const routine = {
+    morningRoutine: ['Use a gentle cleanser.'],
+    eveningRoutine: ['Use a gentle cleanser.'],
+    precautions: [],
+  };
+  const unsupportedTier = await requestAnalysisWithOutputs({
+    imageQuality: 'clear',
+    summary: 'Acne is visible on the forehead.',
+    observations: [{ category: 'visible-shine', observation: 'Light reflects on the forehead.', confidence: 'medium' }],
+    cosmeticInsights: [{ category: 'hydration', tier: 'Balanced' }],
+    skinAgeEstimate: { value: 36, label: 'estimated' },
+  }, routine);
+  assert.equal(unsupportedTier.response.status, 201);
+  const shineResult = await unsupportedTier.response.json();
+  assert.deepEqual(shineResult.cosmeticInsights, []);
+  assert.equal(shineResult.skinAgeEstimate, null);
+  assert.equal(shineResult.summary, 'Light reflects on the forehead.');
+  assert.equal(shineResult.observations.length, 1);
+
+  const limitedEstimate = await requestAnalysisWithOutputs({
+    imageQuality: 'limited',
+    summary: 'Photo detail is limited.',
+    observations: [],
+    cosmeticInsights: [],
+    skinAgeEstimate: { value: 22, label: 'estimated' },
+  }, routine);
+  assert.equal(limitedEstimate.response.status, 201);
+  assert.equal((await limitedEstimate.response.json()).skinAgeEstimate, null);
+});
 
 test('health check is public, minimal, and does not require configured secrets', async () => {
   const response = await worker.fetch(new Request('https://skinsnap.test/health'), {  });
@@ -173,6 +272,8 @@ test('configured browser preflight is answered without authentication', async ()
   assert.equal(response.status, 204);
   assert.equal(response.headers.get('access-control-allow-origin'), origin);
   assert.match(response.headers.get('access-control-allow-headers'), /apikey/i);
+  assert.match(response.headers.get('access-control-allow-headers'), /X-SkinSnap-Preferences/i);
+  assert.match(response.headers.get('access-control-allow-headers'), /X-SkinSnap-Capture-View/i);
 });
 
 test('development analysis is disabled unless explicitly enabled', async () => {
@@ -234,7 +335,7 @@ test('allowlisted development analysis does not require RevenueCat entitlement',
   try {
     const response = await worker.fetch(new Request('https://skinsnap.test/v1/dev/analysis', {
       method: 'POST',
-      headers: { Authorization: 'Bearer test-session', 'Idempotency-Key': 'dev-test-1' },
+      headers: { Authorization: 'Bearer test-session', 'Idempotency-Key': 'dev-test-1', 'X-SkinSnap-Adult-Eligibility': '18+' },
       body: new FormData(),
     }), {
       SUPABASE_URL: 'https://supabase.test',
@@ -338,20 +439,15 @@ test('development analysis uses the live jobs schema and persists the result thr
       const model = JSON.parse(init.body).model;
       if (model === 'qwen/qwen3.8-27b') {
         return new Response(JSON.stringify({
-          choices: [{ message: { content: JSON.stringify({
-            analysisUsable: true,
+          choices: [{ message: {           content: JSON.stringify({
+            disclaimer: 'Cosmetic tracking only, not medical diagnosis',
             imageQuality: 'clear',
-            summary: 'A clear image suitable for general observations.',
+            cosmeticInsights: [],
+            skinAgeEstimate: null,
             observations: [{
               category: 'general-texture',
-              observation: 'Some visible texture.',
+              description: 'Some visible texture.',
               confidence: 'low',
-              title: 'Natural texture',
-              location: 'Cheeks',
-              visibility: 'possibly-visible',
-              limitation: 'The photo detail is limited.',
-              whyItMatters: 'This describes the visible cosmetic finish only.',
-              practicalSuggestion: 'Keep any routine simple and comfortable.',
             }],
           }) } }],
         }), { status: 200 });
@@ -377,6 +473,7 @@ test('development analysis uses the live jobs schema and persists the result thr
       headers: {
         Authorization: 'Bearer test-session',
         'Idempotency-Key': 'test-analysis-1',
+        'X-SkinSnap-Adult-Eligibility': '18+',
       },
       body: form,
     }), {
@@ -431,6 +528,7 @@ test('development quota rejection returns rate-limited before invoking either AI
       headers: {
         Authorization: 'Bearer test-session-token',
         'Idempotency-Key': 'quota-test-1',
+        'X-SkinSnap-Adult-Eligibility': '18+',
       },
       body: form,
     }), {
@@ -480,6 +578,7 @@ test('admin reservation bypasses the former finite monthly limit', async () => {
       headers: {
         Authorization: 'Bearer test-session-token',
         'Idempotency-Key': 'admin-cap-test',
+        'X-SkinSnap-Adult-Eligibility': '18+',
         'X-SkinSnap-Admin': 'true',
       },
       body: form,
@@ -527,6 +626,7 @@ test('the former administrator limit variable no longer blocks reservation', asy
       headers: {
         Authorization: 'Bearer test-session-token',
         'Idempotency-Key': 'admin-invalid-cap-test',
+        'X-SkinSnap-Adult-Eligibility': '18+',
       },
       body: form,
     }), {
@@ -596,6 +696,7 @@ test('a non-admin cannot obtain the admin cap with a client-supplied admin flag'
       headers: {
         Authorization: 'Bearer test-session-token',
         'Idempotency-Key': 'ordinary-cap-test',
+        'X-SkinSnap-Adult-Eligibility': '18+',
         'X-SkinSnap-Admin': 'true',
       },
       body: form,
@@ -658,6 +759,7 @@ test('an existing idempotency reservation returns the saved result without invok
       headers: {
         Authorization: 'Bearer test-session-token',
         'Idempotency-Key': 'same-analysis-key',
+        'X-SkinSnap-Adult-Eligibility': '18+',
       },
       body: form,
     }), {
@@ -707,6 +809,7 @@ test('admin identity does not bypass premium entitlement or production analysis 
       headers: {
         Authorization: 'Bearer test-session-token',
         'Idempotency-Key': 'admin-production-test',
+        'X-SkinSnap-Adult-Eligibility': '18+',
       },
       body: form,
     }), {
@@ -761,11 +864,10 @@ test('analysis history reads completed results from the live jobs table', async 
   }
 });
 
-test('Groq vision receives the image and unsafe observations are rejected before routine generation', async () => {
+test('Groq vision retries malformed or unsafe output once and rejects it before routine generation', async () => {
   const { response, requests } = await requestAnalysisWithOutputs({
     imageQuality: 'clear',
-    summary: 'This appears to be acne and should be diagnosed.',
-    observations: [],
+    observations: [{ category: 'overall-finish', observation: 'This appears to be acne and should be diagnosed.', confidence: 'high' }],
   });
   assert.equal(response.status, 502);
   assert.equal((await response.json()).error, 'vision-invalid-response');
@@ -773,23 +875,51 @@ test('Groq vision receives the image and unsafe observations are rejected before
   assert.ok(visionRequest);
   const imagePart = visionRequest.body.messages[0].content.find((part) => part.type === 'image_url');
   assert.equal(imagePart.image_url.url, 'data:image/jpeg;base64,AQID');
-  assert.equal(requests.filter((request) => request.url.includes('api.groq.com')).length, 1);
+  assert.equal(requests.filter((request) => request.url.includes('api.groq.com')).length, 2);
   assert.ok(!requests.some((request) => request.url.endsWith('/rest/v1/rpc/complete_skinsnap_analysis')));
 });
 
-test('unusable photos skip the routine and release their reservation without invented findings', async () => {
-  for (const summary of ['No skin is visible. Choose a clear skin photo.', 'This photo is too blurry. Retake in sharp focus.', 'The image is too bright to see skin detail.']) {
-    const { response, requests } = await requestAnalysisWithOutputs({
-      analysisUsable: false,
-      imageQuality: 'limited',
-      summary,
-      observations: [],
-    });
-    assert.equal(response.status, 422);
-    assert.equal((await response.json()).error, 'photo-not-suitable');
-    assert.ok(!requests.some(request => request.model === 'openai/gpt-oss-20b'));
-    assert.ok(requests.some(request => request.method === 'PATCH' && request.url.includes('/analysis_jobs?')));
-  }
+test('Groq vision retries a malformed response with corrective formatting guidance', async () => {
+  const validResult = {
+    imageQuality: 'clear',
+    observations: [{ category: 'overall-finish', observation: 'A visible natural skin finish.', confidence: 'moderate' }],
+  };
+  const malformed = new Response(JSON.stringify({
+    choices: [{ message: { content: 'The photo looks fine.' } }],
+  }), { status: 200 });
+  const corrected = new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify(validResult) } }],
+  }), { status: 200 });
+  const { response, requests } = await requestAnalysisWithOutputs(null, {
+    morningRoutine: ['Use a gentle cleanser.'],
+    eveningRoutine: ['Use a gentle cleanser.'],
+    precautions: [],
+  }, { visionResponses: [malformed, corrected] });
+
+  assert.equal(response.status, 201, JSON.stringify(await response.clone().json()));
+  assert.equal(requests.filter((request) => request.model === 'qwen/qwen3.8-27b').length, 2);
+  const retryRequest = requests.filter((request) => request.model === 'qwen/qwen3.8-27b')[1];
+  assert.match(retryRequest.body.messages[0].content[0].text, /previous response did not match the required format/i);
+  assert.equal(requests.filter((request) => request.model === 'openai/gpt-oss-20b').length, 1);
+});
+
+test('photos with no clear visible detail return limited observations without cosmetic estimates', async () => {
+  const { response } = await requestAnalysisWithOutputs({
+    imageQuality: 'limited',
+    observations: [],
+    cosmeticInsights: [],
+    skinAgeEstimate: null,
+  }, {
+    morningRoutine: ['Use a gentle cleanser.'],
+    eveningRoutine: ['Use a gentle cleanser.'],
+    precautions: [],
+  });
+  assert.equal(response.status, 201);
+  const result = await response.json();
+  assert.equal(result.imageQuality, 'limited');
+  assert.deepEqual(result.observations, []);
+  assert.deepEqual(result.cosmeticInsights, []);
+  assert.equal(result.skinAgeEstimate, null);
 });
 
 test('small or moderately blurry but usable photos complete cautiously without invented findings', async () => {
@@ -814,9 +944,39 @@ test('small or moderately blurry but usable photos complete cautiously without i
   assert.ok(requests.some(request => request.model === 'openai/gpt-oss-20b'));
   assert.ok(!Object.hasOwn(result, 'analysisUsable'));
   const visionPrompt = requests.find(request => request.model === 'qwen/qwen3.8-27b').body.messages[0].content[0].text;
-  assert.match(visionPrompt, /small or imperfect photos/i);
+  assert.match(visionPrompt, /moderately clear photo shows visible skin texture/i);
   assert.match(visionPrompt, /zero to seven supported observations/i);
-  assert.match(visionPrompt, /Do not reject a photo solely because it is blurry or small/i);
+  assert.match(visionPrompt, /Use limited only when the visible face\/skin is very small, extremely blurry, or completely dark\/overexposed/i);
+});
+
+test('side-profile photo context reaches the vision model and limits observations to visible areas', async () => {
+  const { response, requests } = await requestAnalysisWithOutputs({
+    imageQuality: 'limited',
+    summary: 'A side profile is visible; photo detail is limited.',
+    observations: [],
+  }, {
+    morningRoutine: ['Use a gentle cleanser if needed, then moisturizer and sunscreen.'],
+    eveningRoutine: ['Cleanse gently and apply moisturizer.'],
+    precautions: ['This routine is general because the photo detail is limited.'],
+  }, { captureView: 'side' });
+
+  assert.equal(response.status, 201);
+  const prompt = requests.find(request => request.model === 'qwen/qwen3.8-27b').body.messages[0].content[0].text;
+  assert.match(prompt, /side-profile view/i);
+  assert.match(prompt, /do not require a frontal face/i);
+  assert.match(prompt, /hidden regions/i);
+});
+
+test('analysis rejects unsupported capture-view values before provider use', async () => {
+  const { response, requests } = await requestAnalysisWithOutputs({
+    imageQuality: 'clear',
+    summary: 'A clear photo with visible skin detail.',
+    observations: [],
+  }, null, { captureView: 'portrait' });
+
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, 'invalid-capture-view');
+  assert.equal(requests.some(request => request.url.includes('api.groq.com')), false);
 });
 
 test('recognizable but very soft skin photos may complete with no findings and general guidance', async () => {
@@ -855,7 +1015,7 @@ test('usable limited-quality photos with no supported findings receive only gene
   assert.ok(requests.some(request => request.model === 'openai/gpt-oss-20b'));
 });
 
-test('the seven optional insight categories are accepted with validated explanation and suggestion fields', async () => {
+test('the seven visible observation categories are accepted without optional explanation fields', async () => {
   const categories = [
     'visible-shine',
     'general-texture',
@@ -888,7 +1048,7 @@ test('the seven optional insight categories are accepted with validated explanat
   assert.equal(response.status, 201);
   const result = await response.json();
   assert.deepEqual(result.observations.map(item => item.category), categories);
-  assert.ok(result.observations.every(item => item.whyItMatters && item.practicalSuggestion));
+  assert.ok(result.observations.every(item => typeof item.observation === 'string' && !Object.hasOwn(item, 'whyItMatters')));
 });
 test('optional explanation and suggestion fields can be omitted instead of guessed', async () => {
   const { response } = await requestAnalysisWithOutputs({
@@ -931,8 +1091,16 @@ test('the existing vision schema remains sufficient and optional preferences onl
   assert.equal(invalid.response.status, 400);
   assert.ok(!invalid.requests.some(request => request.model));
 });
-test('missing AI fields and attractiveness claims fail validation without a fallback result', async () => {
-  for (const output of [{ summary: 'Missing fields.' }, { imageQuality: 'clear', summary: 'Your beauty score is 95%.', observations: [] }]) {
+test('missing AI fields and unsafe observation claims fail validation without a fallback result', async () => {
+  for (const output of [
+    { summary: 'Missing fields.' },
+    {
+      imageQuality: 'clear',
+      observations: [{ category: 'overall-finish', observation: 'This skin has acne and is unhealthy.', confidence: 'high' }],
+      cosmeticInsights: [],
+      skinAgeEstimate: null,
+    },
+  ]) {
     const { response, requests } = await requestAnalysisWithOutputs(output);
     assert.equal(response.status, 502);
     assert.ok(!requests.some(request => request.url.endsWith('/rpc/complete_skinsnap_analysis')));
@@ -1051,6 +1219,17 @@ test('Groq vision model errors are classified and are not retried', async () => 
   assert.equal(requests.filter((request) => request.model === 'qwen/qwen3.8-27b').length, 1);
   assert.equal(logs[0][1].category, 'model-or-endpoint-not-found');
   assert.equal(logs[0][1].model, 'qwen/qwen3.8-27b');
+});
+
+test('vision response bodies have a hard deadline and fail cleanly rather than leaving scans pending', async () => {
+  const { response, logs } = await requestAnalysisWithOutputs(null, null, {
+    visionResponses: [
+      new Response(new ReadableStream({ start() {} }), { status: 200 }),
+    ],
+  });
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, 'vision-provider-unavailable');
+  assert.ok(logs.some(([message, details]) => message === '[SkinSnap upstream]' && details.category === 'timeout'));
 });
 
 test('Groq vision does not wait or retry when Retry-After exceeds the bounded window', async () => {

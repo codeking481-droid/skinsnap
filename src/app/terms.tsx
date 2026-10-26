@@ -23,9 +23,9 @@ export default function TermsScreen() {
   </ScrollView></View>;
 }
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#08070C' }, content: { paddingHorizontal: 24, maxWidth: 560, width: '100%', alignSelf: 'center', gap: 15 },
+  screen: { flex: 1, backgroundColor: '#0A0A0A' }, content: { paddingHorizontal: 24, maxWidth: 560, width: '100%', alignSelf: 'center', gap: 15 },
   title: { color: '#FFF', fontFamily: 'InterExtraBold', fontSize: 27, lineHeight: 35 },
-  heading: { color: '#FF9BB9', fontFamily: 'InterSemibold', fontSize: 17, marginTop: 8 },
+  heading: { color: '#E8C9A0', fontFamily: 'InterSemibold', fontSize: 17, marginTop: 8 },
   copy: { color: '#DDD2DD', fontFamily: 'InterRegular', fontSize: 14, lineHeight: 22 },
-  button: { minHeight: 48, justifyContent: 'center' }, link: { color: '#FF9BB9', fontSize: 14, textDecorationLine: 'underline' },
+  button: { minHeight: 48, justifyContent: 'center' }, link: { color: '#E8C9A0', fontSize: 14, textDecorationLine: 'underline' },
 });

@@ -16,41 +16,48 @@ import {
 test('subscription product and premium entitlement identifiers stay stable', () => {
   assert.equal(PREMIUM_ENTITLEMENT_ID, 'skinsnap_premium');
   assert.deepEqual(SUBSCRIPTION_PRODUCTS, {
-    weekly: 'skinsnap_weekly',
-    yearly: 'skinsnap_yearly',
+    weekly: 'skinsnap_weekly_499',
+    monthly: 'skinsnap_monthly_1299',
+    yearly: 'skinsnap_yearly_4999',
     yearlyDownsell: 'skinsnap_yearly_downsell',
   });
-  assert.equal(productMatches('skinsnap_yearly:annual', SUBSCRIPTION_PRODUCTS.yearly), true);
-  assert.equal(productMatches('skinsnap_yearly_extra', SUBSCRIPTION_PRODUCTS.yearly), false);
+  assert.equal(productMatches('skinsnap_yearly_4999:annual', SUBSCRIPTION_PRODUCTS.yearly), true);
+  assert.equal(productMatches('skinsnap_yearly_4999_extra', SUBSCRIPTION_PRODUCTS.yearly), false);
 });
 
-test('only weekly and annual recurring products without introductory pricing pass validation', () => {
+test('weekly, monthly, and annual products without introductory pricing pass validation', () => {
   assert.equal(isProductWithoutIntro({
-    identifier: 'skinsnap_weekly',
+    identifier: 'skinsnap_weekly_499',
     subscriptionPeriod: 'P1W',
     introPrice: null,
     defaultOption: { freePhase: null, introPhase: null },
   }, 'weekly'), true);
   assert.equal(isProductWithoutIntro({
-    identifier: 'skinsnap_yearly',
+    identifier: 'skinsnap_monthly_1299',
+    subscriptionPeriod: 'P1M',
+    introPrice: null,
+    defaultOption: { freePhase: null, introPhase: null },
+  }, 'monthly'), true);
+  assert.equal(isProductWithoutIntro({
+    identifier: 'skinsnap_yearly_4999',
     subscriptionPeriod: 'P1Y',
     introPrice: null,
     defaultOption: { freePhase: null, introPhase: null },
   }, 'yearly'), true);
   assert.equal(isProductWithoutIntro({
-    identifier: 'skinsnap_yearly',
+    identifier: 'skinsnap_yearly_4999',
     subscriptionPeriod: 'P1Y',
     introPrice: { priceString: '$0' },
     defaultOption: null,
   }, 'yearly'), false);
   assert.equal(isProductWithoutIntro({
-    identifier: 'skinsnap_yearly',
+    identifier: 'skinsnap_yearly_4999',
     subscriptionPeriod: 'P1Y',
     introPrice: null,
     defaultOption: { freePhase: {}, introPhase: null },
   }, 'yearly'), false);
   assert.equal(isProductWithoutIntro({
-    identifier: 'skinsnap_yearly',
+    identifier: 'skinsnap_monthly_1299',
     subscriptionPeriod: 'P1M',
     introPrice: null,
   }, 'yearly'), false);
@@ -81,6 +88,7 @@ test('entitlements require active verified access and must not be expired', () =
 });
 
 test('exclusive annual savings are calculated only for comparable store prices', () => {
+  assert.equal(calculateSavingsPercent(12.99 * 12, 49.99, 'USD', 'USD'), 68);
   assert.equal(calculateSavingsPercent(29.99, 24.99, 'USD', 'USD'), 17);
   assert.equal(calculateSavingsPercent(29.99, 29.99, 'USD', 'USD'), null);
   assert.equal(calculateSavingsPercent(29.99, 24.99, 'USD', 'CAD'), null);
@@ -99,7 +107,7 @@ test('one-time downsell claims require an eligible server response and cannot be
   assert.equal(parseDownsellClaimResponse({
     eligible: true,
     claimId: 'server-claim-2',
-    productIdentifier: 'skinsnap_yearly',
+    productIdentifier: 'skinsnap_yearly_4999',
   }, 'skinsnap_yearly_downsell'), null);
   assert.equal(parseDownsellClaimResponse({ eligible: false }, 'skinsnap_yearly_downsell'), null);
   assert.equal(isDownsellPreviouslyUsed('true'), true);

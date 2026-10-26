@@ -14,7 +14,9 @@ import { ensureAuthenticatedSession, getSessionToken, sessionFailureMessage, ver
 import { isAnalysisResponseAllowed } from '../subscriptionRules';
 import { isSafeCosmeticText, parseRoutineGuidance } from '../routinePresentation';
 import { runAnalysisOnce } from '../analysisRequestRegistry';
-import { parseAnalysisQuality, parseAnalysisPreferences, parseObservationEvidence, type AnalysisPreferences, type AnalysisQuality, type ObservationEvidence } from '../analysisQuality';
+import { ADULT_AGE_ASSERTION_HEADER, COSMETIC_DISCLAIMER, parseAnalysisCaptureView, parseAnalysisQuality, parseAnalysisPreferences, parseCosmeticInsights, parseCosmeticSkinAge, parseObservationEvidence, type AnalysisCaptureView, type AnalysisPreferences, type AnalysisQuality, type CosmeticInsight, type CosmeticSkinAgeEstimate, type ObservationEvidence } from '../analysisQuality';
+import { loadPreferences } from '../preferences';
+import { isAdultEligibilityConfirmed } from '../privacy';
 import {
   analysisFailureStage,
   analysisRequestTimeoutMs,
@@ -64,6 +66,10 @@ export type SkinAnalysisResult = AnalysisQuality & {
   createdAt: string;
   imageQuality: 'clear' | 'limited';
   summary: string;
+  captureView?: AnalysisCaptureView;
+  cosmeticInsights?: CosmeticInsight[];
+  skinAgeEstimate?: CosmeticSkinAgeEstimate | null;
+  disclaimer: typeof COSMETIC_DISCLAIMER;
   observations: SkinObservation[];
   morningRoutine: string[];
   eveningRoutine: string[];
@@ -78,6 +84,7 @@ export type AnalysisErrorCode =
   | 'service-unavailable'
   | 'authentication-required'
   | 'consent-required'
+  | 'adult-eligibility-required'
   | 'photo-unavailable'
   | 'rate-limited'
   | 'admin-test-cap-reached'
@@ -172,6 +179,7 @@ export function parseAnalysisResult(
     || !['clear', 'limited'].includes(String(value.imageQuality))
     || !isShortText(value.summary, 800)
     || !isSafeCosmeticText(value.summary)
+    || (value.disclaimer !== undefined && value.disclaimer !== COSMETIC_DISCLAIMER)
     || !Array.isArray(value.observations)
     || value.observations.length > 12
     || !Array.isArray(value.morningRoutine)
@@ -186,24 +194,43 @@ export function parseAnalysisResult(
   }
 
   const observations: SkinObservation[] = value.observations.map((item) => {
+    const observationText = typeof item === 'object' && item !== null && typeof (item as Record<string, unknown>).observation === 'string'
+      ? (item as Record<string, unknown>).observation
+      : typeof item === 'object' && item !== null && typeof (item as Record<string, unknown>).description === 'string'
+        ? (item as Record<string, unknown>).description
+        : undefined;
     if (!isRecord(item)
       || typeof item.category !== 'string'
       || !OBSERVATION_CATEGORIES.includes(item.category as SkinObservation['category'])
-      || !isShortText(item.observation, 400)
-      || !isSafeCosmeticText(item.observation)
+      || !isShortText(observationText, 400)
+      || !isSafeCosmeticText(observationText)
       || !['low', 'moderate', 'high'].includes(String(item.confidence))) {
       throw new AnalysisRequestError('invalid-response', 'The analysis service returned an unsupported observation.');
     }
     let evidence: ObservationEvidence;
-    try { evidence = parseObservationEvidence(item, isSafeCosmeticText); }
+    try { evidence = parseObservationEvidence({ ...item, observation: observationText }, isSafeCosmeticText); }
     catch { throw new AnalysisRequestError('invalid-response', 'The observation evidence could not be validated.'); }
     return {
       ...evidence,
       category: item.category as SkinObservation['category'],
-      observation: item.observation,
+      observation: observationText,
       confidence: item.confidence as SkinObservation['confidence'],
     };
   });
+  let cosmeticInsights: CosmeticInsight[];
+  try {
+    cosmeticInsights = parseCosmeticInsights(value.cosmeticInsights, observations, value.imageQuality as SkinAnalysisResult['imageQuality']);
+  } catch {
+    throw new AnalysisRequestError('invalid-response', 'The analysis service returned unsupported cosmetic insight tiers.');
+  }
+  let skinAgeEstimate: CosmeticSkinAgeEstimate | null | undefined;
+  try {
+    skinAgeEstimate = options.savedHistory && value.captureView !== 'front'
+      ? undefined
+      : parseCosmeticSkinAge(value.skinAgeEstimate, value.imageQuality as SkinAnalysisResult['imageQuality'], value.captureView === 'front' ? 'front' : 'side');
+  } catch {
+    throw new AnalysisRequestError('invalid-response', 'The cosmetic age estimate could not be validated.');
+  }
   const readGuidance = (list: unknown[]): string[] => {
     try {
       return parseRoutineGuidance(list, options.savedHistory === true);
@@ -222,6 +249,10 @@ export function parseAnalysisResult(
     createdAt: value.createdAt,
     imageQuality: value.imageQuality as SkinAnalysisResult['imageQuality'],
     summary: value.summary,
+    disclaimer: COSMETIC_DISCLAIMER,
+    ...(value.captureView === 'front' || value.captureView === 'side' ? { captureView: value.captureView } : {}),
+    ...(value.cosmeticInsights !== undefined ? { cosmeticInsights } : {}),
+    ...(skinAgeEstimate !== undefined ? { skinAgeEstimate } : {}),
     observations,
     morningRoutine: readGuidance(value.morningRoutine),
     eveningRoutine: readGuidance(value.eveningRoutine),
@@ -357,9 +388,9 @@ async function preparePhotoForUpload(photoUri: string): Promise<PreparedPhoto> {
 
 export function requestSkinAnalysis(
   photoUri: string, photoUploadConsent: boolean, idempotencyKey: string,
-  mode: 'premium' | 'development' = 'premium', preferences: AnalysisPreferences = {},
+  mode: 'premium' | 'development' = 'premium', preferences: AnalysisPreferences = {}, photoView: AnalysisCaptureView = 'front',
 ): Promise<SkinAnalysisResult> {
-  return runAnalysisOnce(idempotencyKey, () => performSkinAnalysis(photoUri, photoUploadConsent, idempotencyKey, mode, preferences));
+  return runAnalysisOnce(idempotencyKey, () => performSkinAnalysis(photoUri, photoUploadConsent, idempotencyKey, mode, preferences, photoView));
 }
 
 async function performSkinAnalysis(
@@ -368,9 +399,16 @@ async function performSkinAnalysis(
   idempotencyKey: string,
   mode: 'premium' | 'development' = 'premium',
   preferences: AnalysisPreferences = {},
+  photoView: AnalysisCaptureView = 'front',
 ): Promise<SkinAnalysisResult> {
   if (mode === 'development' && !__DEV__) throw new AnalysisRequestError('development-test-unavailable', 'Development analysis is not available in release builds.');
+  const eligibility = await loadPreferences();
+  if (!eligibility.onboardingComplete || !isAdultEligibilityConfirmed(eligibility.ageConfirmed)) {
+    throw new AnalysisRequestError('adult-eligibility-required', 'SkinSnap is available only to people aged 18 or older. No photo was sent.');
+  }
   const validatedPreferences = parseAnalysisPreferences(preferences);
+  const validatedPhotoView = parseAnalysisCaptureView(photoView);
+  if (!validatedPhotoView) throw new AnalysisRequestError('invalid-response', 'Choose a front view or side profile before starting the analysis.');
   const requestId = diagnosticRequestId(idempotencyKey);
   if (!photoUploadConsent) {
     throw new AnalysisRequestError('consent-required', 'Confirm photo upload consent before requesting analysis.');
@@ -390,6 +428,13 @@ async function performSkinAnalysis(
   }
   if (!session.valid) {
     logStageFailure('authentication', `session-${session.reason}`, { requestId });
+    if (mode === 'development' && session.reason === 'missing') {
+      throw new AnalysisRequestError(
+        'authentication-required',
+        'Sign in to the authorized development test account before requesting analysis. No photo was sent.',
+        'authentication',
+      );
+    }
     throw new AnalysisRequestError(
       'authentication-required',
       sessionFailureMessage(session),
@@ -471,7 +516,12 @@ async function performSkinAnalysis(
       );
       const upload = await file.upload(endpoint, {
         ...uploadRequest.options,
-        headers: { ...uploadRequest.options.headers, 'X-SkinSnap-Preferences': JSON.stringify(validatedPreferences).replace(/[\u007f-\uffff]/g, char => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0')) },
+        headers: {
+          ...uploadRequest.options.headers,
+          [ADULT_AGE_ASSERTION_HEADER]: '18+',
+          'X-SkinSnap-Preferences': JSON.stringify(validatedPreferences).replace(/[\u007f-\uffff]/g, char => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0')),
+          'X-SkinSnap-Capture-View': validatedPhotoView,
+        },
       });
       response = new Response(upload.body, { status: upload.status, headers: upload.headers });
     } else {
@@ -481,8 +531,10 @@ async function performSkinAnalysis(
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
+        [ADULT_AGE_ASSERTION_HEADER]: '18+',
         'Idempotency-Key': idempotencyKey,
         'X-SkinSnap-Preferences': JSON.stringify(validatedPreferences).replace(/[\u007f-\uffff]/g, char => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0')),
+        'X-SkinSnap-Capture-View': validatedPhotoView,
       },
       body: form,
       signal: controller.signal,
@@ -530,6 +582,9 @@ async function performSkinAnalysis(
     throw new AnalysisRequestError('authentication-required', 'Your sign-in has expired. Sign in again to continue.', 'authentication');
   }
   if (response.status === 403) {
+    if (serverErrorCode === 'adult-eligibility-required') {
+      throw new AnalysisRequestError('adult-eligibility-required', 'SkinSnap is available only to people aged 18 or older. No photo was analyzed.', 'authentication');
+    }
     if (mode === 'development') {
       const code = serverErrorCode ?? 'http-403';
       logStageFailure('authentication', code, diagnostic);

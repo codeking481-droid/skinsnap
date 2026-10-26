@@ -4,10 +4,12 @@ export const PHOTO_UPLOAD_FIELD = 'photo';
 export const PHOTO_UPLOAD_NAME = 'skin-photo.jpg';
 export const PHOTO_UPLOAD_MIME_TYPE = 'image/jpeg';
 
-const GEMINI_ATTEMPT_TIMEOUT_MS = 35_000;
-const GEMINI_ATTEMPT_LIMIT = 2;
-const GEMINI_RETRY_DELAY_MS = 10_000;
-const GROQ_REQUEST_TIMEOUT_MS = 25_000;
+const VISION_ATTEMPT_TIMEOUT_MS = 35_000;
+const VISION_RESPONSE_BODY_TIMEOUT_MS = 5_000;
+const VISION_ATTEMPT_LIMIT = 2;
+const VISION_RETRY_DELAY_MS = 10_000;
+const ROUTINE_REQUEST_TIMEOUT_MS = 25_000;
+const ROUTINE_RESPONSE_BODY_TIMEOUT_MS = 5_000;
 const REQUEST_FINALIZATION_BUFFER_MS = 15_000;
 const MIN_UPLOAD_BYTES_PER_SECOND = 128 * 1024;
 
@@ -16,9 +18,10 @@ export function analysisRequestTimeoutMs(photoBytes: number, maxPhotoBytes: numb
     ? Math.max(0, Math.min(photoBytes, maxPhotoBytes))
     : maxPhotoBytes;
   const uploadBudgetMs = Math.ceil((safePhotoBytes / MIN_UPLOAD_BYTES_PER_SECOND) * 1000);
-  const providerBudgetMs = (GEMINI_ATTEMPT_TIMEOUT_MS * GEMINI_ATTEMPT_LIMIT)
-    + GEMINI_RETRY_DELAY_MS
-    + GROQ_REQUEST_TIMEOUT_MS;
+  const providerBudgetMs = ((VISION_ATTEMPT_TIMEOUT_MS + VISION_RESPONSE_BODY_TIMEOUT_MS) * VISION_ATTEMPT_LIMIT)
+    + VISION_RETRY_DELAY_MS
+    + ROUTINE_REQUEST_TIMEOUT_MS
+    + ROUTINE_RESPONSE_BODY_TIMEOUT_MS;
   return providerBudgetMs + REQUEST_FINALIZATION_BUFFER_MS + uploadBudgetMs;
 }
 

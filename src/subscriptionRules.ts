@@ -3,13 +3,14 @@ export const DEFAULT_OFFERING_ID = 'default';
 export const DOWNSELL_OFFERING_ID = 'yearly_downsell';
 
 export const SUBSCRIPTION_PRODUCTS = {
-  weekly: 'skinsnap_weekly',
-  yearly: 'skinsnap_yearly',
+  weekly: 'skinsnap_weekly_499',
+  monthly: 'skinsnap_monthly_1299',
+  yearly: 'skinsnap_yearly_4999',
   yearlyDownsell: 'skinsnap_yearly_downsell',
 } as const;
 
 export type SubscriptionPlan = keyof typeof SUBSCRIPTION_PRODUCTS;
-export type BillingPeriod = 'weekly' | 'yearly';
+export type BillingPeriod = 'weekly' | 'monthly' | 'yearly';
 
 export type ProductTerms = {
   identifier: string;
@@ -34,7 +35,7 @@ export function productMatches(identifier: string, productId: string): boolean {
 }
 
 export function isProductWithoutIntro(product: ProductTerms, period: BillingPeriod): boolean {
-  const expectedPeriod = period === 'weekly' ? 'P1W' : 'P1Y';
+  const expectedPeriod = period === 'weekly' ? 'P1W' : period === 'monthly' ? 'P1M' : 'P1Y';
   return product.subscriptionPeriod === expectedPeriod
     && product.introPrice == null
     && product.defaultOption?.freePhase == null

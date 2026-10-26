@@ -41,6 +41,7 @@ export default function AnalysisScreen() {
     acceptAnalysisResult,
     analysisPreferences,
     analysisRequestKey,
+    photoView,
   } = usePhoto();
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -74,6 +75,7 @@ export default function AnalysisScreen() {
         idempotencyKey.current,
         developmentTestMode ? 'development' : 'premium',
         analysisPreferences,
+        photoView,
       );
       completedOutcome.current = { result };
       if (!active.current) return;
@@ -93,7 +95,7 @@ export default function AnalysisScreen() {
       inFlight.current = false;
       if (active.current) setBusy(false);
     }
-  }, [acceptAnalysisResult, analysisPreferences, photoUnavailable, photoUploadConsent, photoUri]);
+  }, [acceptAnalysisResult, analysisPreferences, photoUnavailable, photoUploadConsent, photoUri, photoView]);
 
   useFocusEffect(useCallback(() => {
     active.current = true;
@@ -123,33 +125,24 @@ export default function AnalysisScreen() {
 
   const returnToPlans = () => router.replace('/paywall');
   const returnToUpload = () => backOrReplace('/upload');
+  const continueWithSignIn = () => router.push({ pathname: '/sign-in', params: { continueScan: 'true' } });
 
   if (busy) {
-    return (
-      <CinematicSkinScanner
-        photoUri={photoUri && !photoUnavailable ? photoUri : null}
-        developmentTestMode={developmentTestMode}
-        onBack={returnToUpload}
-        onPhotoError={() => {
-          setPhotoUnavailable(true);
-          setPhotoUri(null);
-        }}
-      />
-    );
+    return <CinematicSkinScanner onBack={returnToUpload} />;
   }
 
   return (
     <View style={styles.screen}>
       <ScrollView contentContainerStyle={[styles.scroll, { minHeight: height }]} showsVerticalScrollIndicator={false}>
         <View style={[styles.page, { width: Math.min(width, 520), paddingHorizontal: 27 * scale, paddingTop: Math.max(insets.top, 14 * scale), paddingBottom: Math.max(insets.bottom, 22 * scale) }]}>
-          <Image source={require('../../assets/images/welcome-portrait.png')} style={StyleSheet.absoluteFill} resizeMode="cover" accessible={false} />
-          <LinearGradient colors={['rgba(4,3,7,0.83)', 'rgba(4,3,7,0.92)', '#050509']} locations={[0, 0.49, 1]} style={StyleSheet.absoluteFill} pointerEvents="none" />
+          <Image source={require('../../assets/images/upload-sample.png')} style={StyleSheet.absoluteFill} resizeMode="cover" accessible={false} />
+          <LinearGradient colors={['rgba(10,10,10,0.83)', 'rgba(10,10,10,0.92)', '#0A0A0A']} locations={[0, 0.49, 1]} style={StyleSheet.absoluteFill} pointerEvents="none" />
           <Pressable accessibilityRole="button" accessibilityLabel="Back to selected photo" hitSlop={12} onPress={returnToUpload} style={[styles.back, { width: 44 * scale, height: 44 * scale }]}>
             <Svg width={25 * scale} height={25 * scale} viewBox="0 0 24 24" fill="none" stroke="#FFF" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><Path d="m15 18-6-6 6-6" /></Svg>
           </Pressable>
 
           <Text style={[styles.heading, { fontSize: 27 * scale, lineHeight: 34 * scale, marginTop: 18 * scale }]}>
-            {busy ? <>Preparing your{'\n'}<Text style={styles.pink}>skin insights</Text></> : 'Analysis not completed'}
+            {busy ? <>Preparing your{'\n'}<Text style={styles.accent}>skin insights</Text></> : 'Analysis not completed'}
           </Text>
           <Text style={[styles.subtitle, { fontSize: 12.5 * scale, lineHeight: 18 * scale, marginTop: 7 * scale }]}>
             {busy
@@ -170,9 +163,9 @@ export default function AnalysisScreen() {
           <View style={[styles.scanner, { width: ringSize, height: ringSize, marginTop: 27 * scale }]}>
             <View pointerEvents="none" style={StyleSheet.absoluteFill}>
               <Svg width="100%" height="100%" viewBox="0 0 300 300">
-                <Circle cx="150" cy="150" r="138" stroke="#49303C" strokeWidth="1.4" fill="none" />
-                <Circle cx="150" cy="150" r="127" stroke="#9A3C61" strokeOpacity="0.72" strokeWidth="1" fill="none" />
-                {Array.from({ length: 36 }, (_, tick) => <Path key={tick} d="M150 13v7" transform={`rotate(${tick * 10} 150 150)`} stroke={tick % 3 === 0 ? '#FF78A4' : '#74324A'} strokeOpacity={tick % 3 === 0 ? 0.8 : 0.5} strokeWidth={tick % 3 === 0 ? 1.2 : 0.7} />)}
+                <Circle cx="150" cy="150" r="138" stroke="#534738" strokeWidth="1.4" fill="none" />
+                <Circle cx="150" cy="150" r="127" stroke="#D4B896" strokeOpacity="0.72" strokeWidth="1" fill="none" />
+                {Array.from({ length: 36 }, (_, tick) => <Path key={tick} d="M150 13v7" transform={`rotate(${tick * 10} 150 150)`} stroke={tick % 3 === 0 ? '#E8C9A0' : '#534738'} strokeOpacity={tick % 3 === 0 ? 0.8 : 0.5} strokeWidth={tick % 3 === 0 ? 1.2 : 0.7} />)}
               </Svg>
             </View>
             <View style={[styles.photoFrame, { width: ringSize * 0.75, height: ringSize * 0.75, borderRadius: ringSize / 2 }]}>
@@ -185,8 +178,8 @@ export default function AnalysisScreen() {
               <View pointerEvents="none" style={[styles.faceCorner, styles.faceBL]} />
               <View pointerEvents="none" style={[styles.faceCorner, styles.faceBR]} />
             </View>
-            {busy && <View style={styles.spinner}><ActivityIndicator size="large" color="#FF78A4" /></View>}
-            {!busy && errorMessage && <View style={styles.errorIcon}><Svg width={31 * scale} height={31 * scale} viewBox="0 0 24 24" fill="none" stroke="#FF8BAE" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><Circle cx="12" cy="12" r="9" /><Path d="M12 8v5m0 3h.01" /></Svg></View>}
+            {busy && <View style={styles.spinner}><ActivityIndicator size="large" color="#E8C9A0" /></View>}
+            {!busy && errorMessage && <View style={styles.errorIcon}><Svg width={31 * scale} height={31 * scale} viewBox="0 0 24 24" fill="none" stroke="#E8C9A0" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><Circle cx="12" cy="12" r="9" /><Path d="M12 8v5m0 3h.01" /></Svg></View>}
           </View>
 
           <View style={[styles.infoCard, { borderRadius: 18 * scale, marginTop: 19 * scale, padding: 16 * scale }]}>
@@ -198,29 +191,35 @@ export default function AnalysisScreen() {
                     ? 'No AI analysis or routine generation was started for this attempt. Please wait for the account allowance to become available before starting another scan.'
                   : errorCode === 'photo-unavailable'
                     ? 'Image conversion and file checks happen before upload. A preparation retry does not consume the server-side AI quota; the request key stays unchanged.'
+                    : errorCode === 'authentication-required'
+                      ? 'A secure account is required for this analysis. Your photo was not uploaded; sign in, return here and retry when you are ready.'
                     : 'Your photo helps create skin insights and a routine. Results appear when your analysis is complete.'}
             </Text>
           </View>
 
           {!busy && <View style={styles.actions}>
-            {errorCode === 'subscription-required'
+            {errorCode === 'authentication-required'
+              ? <Pressable accessibilityRole="button" onPress={continueWithSignIn} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
+                <LinearGradient colors={['#E8C9A0', '#D4B896']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>Sign in to continue</Text></LinearGradient>
+              </Pressable>
+              : errorCode === 'subscription-required'
               ? <Pressable accessibilityRole="button" onPress={returnToPlans} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
-                <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>View subscription options</Text></LinearGradient>
+                <LinearGradient colors={['#E8C9A0', '#D4B896']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>View subscription options</Text></LinearGradient>
               </Pressable>
               : errorCode === 'rate-limited' || errorCode === 'admin-test-cap-reached'
                 ? <Pressable accessibilityRole="button" onPress={returnToUpload} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
-                  <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>Return to photo and free tools</Text></LinearGradient>
+                  <LinearGradient colors={['#E8C9A0', '#D4B896']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>Return to photo and free tools</Text></LinearGradient>
                 </Pressable>
               : errorCode === 'development-test-not-authorized' || errorCode === 'development-test-unavailable'
                 ? <Pressable accessibilityRole="button" onPress={retry} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
-                  <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>Retry after test access is fixed</Text></LinearGradient>
+                  <LinearGradient colors={['#E8C9A0', '#D4B896']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>Retry after test access is fixed</Text></LinearGradient>
                 </Pressable>
               : errorCode === 'retry-limit' || errorCode === 'photo-not-suitable'
                 ? <Pressable accessibilityRole="button" onPress={returnToUpload} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
-                  <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>{errorCode === 'photo-not-suitable' ? 'Choose a clearer photo' : 'Start a new scan'}</Text></LinearGradient>
+                  <LinearGradient colors={['#E8C9A0', '#D4B896']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>{errorCode === 'photo-not-suitable' ? 'Choose a clearer photo' : 'Start a new scan'}</Text></LinearGradient>
                 </Pressable>
               : <Pressable accessibilityRole="button" onPress={retry} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
-                <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>{errorCode === 'photo-unavailable' ? 'Retry photo preparation' : errorCode === 'network-error' ? 'Retry same analysis request' : 'Retry secure analysis'}</Text></LinearGradient>
+                <LinearGradient colors={['#E8C9A0', '#D4B896']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>{errorCode === 'photo-unavailable' ? 'Retry photo preparation' : errorCode === 'network-error' ? 'Retry same analysis request' : 'Retry secure analysis'}</Text></LinearGradient>
               </Pressable>}
             <Pressable accessibilityRole="button" onPress={returnToUpload} style={[styles.secondaryButton, { minHeight: 44 * scale, borderRadius: 23 * scale, marginTop: 8 * scale }]}><Text style={[styles.secondaryText, { fontSize: 12 * scale }]}>Return to photo and free tools</Text></Pressable>
           </View>}
@@ -231,30 +230,30 @@ export default function AnalysisScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#050509' },
+  screen: { flex: 1, backgroundColor: '#0A0A0A' },
   scroll: { flexGrow: 1, alignItems: 'center' },
-  page: { flexGrow: 1, overflow: 'hidden', backgroundColor: '#050509', alignItems: 'center' },
+  page: { flexGrow: 1, overflow: 'hidden', backgroundColor: '#0A0A0A', alignItems: 'center' },
   back: { alignSelf: 'flex-start', justifyContent: 'center' },
-  heading: { maxWidth: 330, color: '#F8F7FA', fontFamily: 'InterExtraBold', textAlign: 'center', letterSpacing: -0.7 },
-  pink: { color: '#FF6999' },
+  heading: { maxWidth: 330, color: '#FFFFFF', fontFamily: 'InterExtraBold', textAlign: 'center', letterSpacing: -0.7 },
+  accent: { color: '#E8C9A0' },
   subtitle: { maxWidth: 350, color: '#D0CCD6', textAlign: 'center', fontFamily: 'InterRegular' },
   scanner: { alignItems: 'center', justifyContent: 'center' },
-  photoFrame: { overflow: 'hidden', borderWidth: 1.5, borderColor: '#FF709B', backgroundColor: '#21171D' },
+  photoFrame: { overflow: 'hidden', borderWidth: 1.5, borderColor: '#D4B896', backgroundColor: '#1A1A1C' },
   face: { width: '100%', height: '100%' },
-  noPhoto: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#22171E' },
-  noPhotoText: { color: '#D8BCC8', fontFamily: 'InterMedium', fontSize: 12 },
+  noPhoto: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#1A1A1C' },
+  noPhotoText: { color: '#BDBABD', fontFamily: 'InterMedium', fontSize: 12 },
   faceCorner: { position: 'absolute', width: 22, height: 22, borderColor: '#FFF', borderWidth: 1.4 },
   faceTL: { left: 12, top: 12, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 7 },
   faceTR: { right: 12, top: 12, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 7 },
   faceBL: { left: 12, bottom: 12, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 7 },
   faceBR: { right: 12, bottom: 12, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 7 },
-  spinner: { position: 'absolute', right: '15%', bottom: '13%', width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 25, backgroundColor: 'rgba(15,9,14,0.92)', borderWidth: 1, borderColor: '#FF78A4' },
-  errorIcon: { position: 'absolute', right: '15%', bottom: '13%', width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 25, backgroundColor: 'rgba(15,9,14,0.92)', borderWidth: 1, borderColor: '#FF78A4' },
+  spinner: { position: 'absolute', right: '15%', bottom: '13%', width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 25, backgroundColor: 'rgba(26,26,28,0.92)', borderWidth: 1, borderColor: '#D4B896' },
+  errorIcon: { position: 'absolute', right: '15%', bottom: '13%', width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 25, backgroundColor: 'rgba(26,26,28,0.92)', borderWidth: 1, borderColor: '#D4B896' },
   infoCard: { width: '100%', maxWidth: 370, backgroundColor: 'rgba(20,15,21,0.92)', borderColor: 'rgba(157,81,112,0.52)', borderWidth: 1 },
   infoTitle: { color: '#FFF', fontFamily: 'InterExtraBold' },
   infoText: { color: '#CFC7D2', fontFamily: 'InterRegular' },
   actions: { width: '100%', maxWidth: 370 },
-  primaryButton: { overflow: 'hidden', borderColor: '#FFA3BF', borderWidth: 0.7 },
+  primaryButton: { overflow: 'hidden', borderColor: '#E8C9A0', borderWidth: 0.7 },
   buttonFill: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
   primaryText: { color: '#12070C', fontFamily: 'InterExtraBold', textAlign: 'center' },
   secondaryButton: { alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(19,15,21,0.92)', borderColor: '#584750', borderWidth: 1 },

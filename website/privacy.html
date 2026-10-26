@@ -28,11 +28,11 @@
     <p><strong>Privacy/support contact:</strong> A verified working public email has not been supplied. This is a publication blocker; no placeholder contact is provided.</p>
 
     <h2>Who can use SkinSnap</h2>
-    <p>SkinSnap is for people aged 18 and older. The app asks users to confirm they are at least 18; it does not ask for a date of birth. The confirmation is stored with local app preferences, not as a server-side age record.</p>
+    <p>SkinSnap is an 18+ cosmetic tracking app for launch. The app asks users to confirm they are at least 18 and blocks onboarding when they select under 18; it does not ask for a date of birth or offer a parental-consent route. The confirmation is stored with local app preferences, not as a server-side age record. Analysis requests also require an 18+ self-attestation, which is not independent age verification.</p>
 
     <h2>Information processed</h2>
     <p>When you create an account, Supabase Auth processes your email address, password, and account identifier. The password is sent to Supabase Auth for sign-in and is not saved by SkinSnap in local app storage. A display name may be saved if supplied. The app also processes routine completion, analysis history, offer and entitlement records, and optional routine preferences you choose to provide, such as skin feel, concerns, sensitivity, routine complexity, or budget.</p>
-    <p>The app does not intentionally use facial recognition or infer protected personal attributes. Its analysis is limited to visible cosmetic features and is not a medical diagnosis.</p>
+    <p>The app does not intentionally use facial recognition or infer protected personal attributes. Its analysis is limited to visible cosmetic features and displays: “Cosmetic tracking only, not medical diagnosis.” Cosmetic tiers are observation-backed. An optional skin-age appearance estimate ranges 16–35, is labelled estimated, and is shown only for a clear front-facing photo; it is not a person's actual age or a medical measurement.</p>
 
     <h2>Photos, consent, and AI processing</h2>
     <p>Camera access is used to take a selected photo. The system photo picker lets you choose an image from your device. Before upload, the app explains the processing and asks for affirmative consent. It prepares a resized JPEG copy locally, then sends that copy over HTTPS to the authenticated SkinSnap API hosted on Cloudflare Workers.</p>

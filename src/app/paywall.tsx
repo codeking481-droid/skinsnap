@@ -14,11 +14,11 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import Svg, { Circle, Path } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { PurchasesPackage } from 'react-native-purchases';
 import { usePhoto } from '../PhotoContext';
-import { PUBLISHED_PRIVACY_POLICY_URL, PUBLISHED_TERMS_URL } from '../privacy';
+import { isAdultEligibilityConfirmed, PUBLISHED_PRIVACY_POLICY_URL, PUBLISHED_TERMS_URL } from '../privacy';
 import {
   calculateSavingsPercent,
   type SubscriptionPlan,
@@ -37,22 +37,24 @@ import {
   getActiveDownsellClaim,
 } from '../services/offerEligibility';
 import { ensureAuthenticatedSession, sessionFailureMessage, verifyAuthenticatedSession, type SessionFailureReason } from '../services/session';
+import { loadPreferences, markPaywallComplete } from '../preferences';
 import {
   getPaywallPrice,
   SUBSCRIPTION_PURCHASES_ENABLED,
-  usesDevelopmentPricePreview,
 } from '../paywallPresentation';
 
 const PLAN_DETAILS: Record<SubscriptionPlan, { name: string; period: string; badge?: string }> = {
-  weekly: { name: 'Weekly plan', period: 'week' },
-  yearly: { name: 'Yearly plan', period: 'year', badge: 'BEST VALUE' },
+  weekly: { name: 'Weekly', period: 'week' },
+  monthly: { name: 'Monthly', period: 'month', badge: 'MOST POPULAR' },
+  yearly: { name: 'Yearly', period: 'year' },
   yearlyDownsell: { name: 'Eligible yearly offer', period: 'year', badge: 'ONE-TIME OFFER' },
 };
 
 const BENEFITS = [
-  'AI-assisted, non-diagnostic skin observations',
-  'A routine tailored to your visible skin goals',
-  'Progress history and follow-up tracking',
+  'Non-diagnostic skin observations',
+  'Routine and product ideas',
+  'Optional fragrance inspiration',
+  'Skin diary and progress tracking',
 ];
 
 const developmentTestMode = __DEV__ && process.env.EXPO_PUBLIC_AI_DEV_TEST_MODE === 'true';
@@ -64,35 +66,47 @@ function hasSecureBackend(): boolean {
 export default function PaywallScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ offer?: string }>();
+  const params = useLocalSearchParams<{ offer?: string; next?: string }>();
   const downsell = params.offer === 'downsell';
-  const { photoUri } = usePhoto();
-  const [selectedBasePlan, setSelectedBasePlan] = useState<'weekly' | 'yearly'>('yearly');
+  const { photoUri, photoUploadConsent } = usePhoto();
+  const [selectedBasePlan, setSelectedBasePlan] = useState<'weekly' | 'monthly' | 'yearly'>('monthly');
   const selected: SubscriptionPlan = downsell ? 'yearlyDownsell' : selectedBasePlan;
   const [billingState, setBillingState] = useState<BillingState | null>(null);
   const [downsellReady, setDownsellReady] = useState(false);
   const [hasSession, setHasSession] = useState(false);
+  const [ageEligible, setAgeEligible] = useState(false);
   const [sessionReason, setSessionReason] = useState<SessionFailureReason | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [closeMessage, setCloseMessage] = useState<string | null>(null);
   const [photoUnavailable, setPhotoUnavailable] = useState(false);
   const scale = Math.max(0.9, Math.min(Math.min(width, 520) / 393, 1.08));
+  const continueWithAccess = useCallback(() => {
+    router.replace(params.next === 'analysis' && photoUri && photoUploadConsent ? '/analysis' : '/');
+  }, [params.next, photoUri, photoUploadConsent]);
 
   useFocusEffect(useCallback(() => {
     let active = true;
-    Promise.all([
-      loadBillingState(downsell),
-      SUBSCRIPTION_PURCHASES_ENABLED ? ensureAuthenticatedSession() : verifyAuthenticatedSession(),
-      downsell ? getActiveDownsellClaim() : Promise.resolve(null),
-    ]).then(([state, session, claim]) => {
+    void loadPreferences().then(async preferences => {
+      if (!active) return;
+      if (!preferences.onboardingComplete || !isAdultEligibilityConfirmed(preferences.ageConfirmed)) {
+        setAgeEligible(false);
+        router.replace('/onboarding');
+        return;
+      }
+      setAgeEligible(true);
+      const [state, session, claim] = await Promise.all([
+        loadBillingState(downsell),
+        SUBSCRIPTION_PURCHASES_ENABLED ? ensureAuthenticatedSession() : verifyAuthenticatedSession(),
+        downsell ? getActiveDownsellClaim() : Promise.resolve(null),
+      ]);
       if (!active) return;
       setBillingState(state);
       setHasSession(session.valid);
       setSessionReason(session.valid ? null : session.reason);
       if (downsell) {
         if (!claim) {
-          router.replace('/routine');
+         router.replace('/paywall');
           return;
         }
         setDownsellReady(true);
@@ -100,22 +114,27 @@ export default function PaywallScreen() {
     }).catch(() => {
       if (!active) return;
       setBillingState({ kind: 'error', message: 'Could not prepare subscription information.' });
-      if (downsell) router.replace('/routine');
+      if (downsell) router.replace('/paywall');
     });
     return () => { active = false; };
   }, [downsell]));
 
   useEffect(() => {
     let active = true;
-    getVerifiedEntitlement().then((status) => {
-      if (active && status.active) router.replace('/analysis');
+    getVerifiedEntitlement().then(async status => {
+      if (!active || !status.active) return;
+      await markPaywallComplete();
+      if (active) continueWithAccess();
+    }).catch(() => {
+      if (active) setNotice('Your existing subscription could not be verified. You can continue with free skincare tools.');
     });
     return () => { active = false; };
-  }, []);
+  }, [continueWithAccess]);
 
   const packages = billingState?.kind === 'ready' ? billingState.packages : {};
   const selectedPackage = packages[selected];
   const standardAnnual = packages.yearly;
+  const monthlyPackage = packages.monthly;
   const annualDownsell = packages.yearlyDownsell;
   const savingsPercent = standardAnnual && annualDownsell
     ? calculateSavingsPercent(
@@ -125,10 +144,18 @@ export default function PaywallScreen() {
       annualDownsell.product.currencyCode,
     )
     : null;
+  const annualSavingsPercent = monthlyPackage && standardAnnual
+    ? calculateSavingsPercent(
+      monthlyPackage.product.price * 12,
+      standardAnnual.product.price,
+      monthlyPackage.product.currencyCode,
+      standardAnnual.product.currencyCode,
+    )
+    : null;
   const storeReady = billingState?.kind === 'ready';
-  const developmentPreview = usesDevelopmentPricePreview(__DEV__, billingState?.kind, Platform.OS);
   const legalConfigured = Boolean(PUBLISHED_TERMS_URL && PUBLISHED_PRIVACY_POLICY_URL);
   const canPurchase = SUBSCRIPTION_PURCHASES_ENABLED
+    && ageEligible
     && storeReady
     && Boolean(selectedPackage)
     && hasSession
@@ -136,9 +163,14 @@ export default function PaywallScreen() {
     && hasSecureBackend()
     && (!downsell || (downsellReady && savingsPercent !== null));
 
-  const continueFree = useCallback(() => {
-    router.replace('/routine');
-  }, []);
+  const continueFree = useCallback(async () => {
+    try {
+      await markPaywallComplete();
+      continueWithAccess();
+    } catch {
+      setCloseMessage('Your choice could not be saved on this device. Please try again.');
+    }
+  }, [continueWithAccess]);
 
   const closePaywall = useCallback(async () => {
     if (busy) return;
@@ -176,7 +208,7 @@ export default function PaywallScreen() {
         if (discount !== null) {
           const result = await claimDownsellOnce();
           if (result.kind === 'claimed') {
-            router.push({ pathname: '/paywall', params: { offer: 'downsell' } });
+            router.push({ pathname: '/paywall', params: { offer: 'downsell', ...(params.next ? { next: params.next } : {}) } });
             return;
           }
           if (result.kind === 'unavailable') {
@@ -191,7 +223,7 @@ export default function PaywallScreen() {
     } finally {
       setBusy(false);
     }
-  }, [busy, continueFree, downsell]);
+  }, [busy, continueFree, downsell, params.next]);
 
   useFocusEffect(useCallback(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -207,13 +239,18 @@ export default function PaywallScreen() {
     const result = await purchasePlan(selected, selectedPackage);
     if (result.kind === 'active') {
       if (downsell) consumeDownsellClaim();
-      router.replace('/analysis');
-      return;
+      try {
+        await markPaywallComplete();
+        router.replace('/');
+        return;
+      } catch {
+        setNotice('Google Play confirmed your subscription, but SkinSnap could not save your onboarding progress. Please try again.');
+      }
     }
     if (result.kind === 'cancelled') setNotice('Purchase cancelled. No subscription was started.');
     else if (result.kind === 'pending') setNotice('Google Play is processing your payment. Premium access stays locked until the store confirms it.');
     else if (result.kind === 'inactive') setNotice('The store has not confirmed an active SkinSnap entitlement. No analysis was started.');
-    else setNotice(result.message);
+    else if (result.kind === 'error') setNotice(result.message);
     setBusy(false);
   };
 
@@ -225,8 +262,13 @@ export default function PaywallScreen() {
       if (!hasSecureBackend() || !hasSession) {
         setNotice('A subscription is active, but sign-in and the secure analysis service are not configured in this app yet.');
       } else {
-        router.replace('/analysis');
-        return;
+        try {
+          await markPaywallComplete();
+          continueWithAccess();
+          return;
+        } catch {
+          setNotice('Your active subscription was restored, but SkinSnap could not save your onboarding progress. Please try again.');
+        }
       }
     } else if (status.reason === 'inactive') {
       setNotice('No active SkinSnap subscription was found for this Google Play account.');
@@ -259,7 +301,19 @@ export default function PaywallScreen() {
 
   const activePhotoUri = photoUri && !photoUnavailable ? photoUri : null;
   const showStorePrice = (plan: SubscriptionPlan, product: PurchasesPackage | undefined) =>
-    getPaywallPrice(plan, product?.product.priceString, developmentPreview).label;
+    getPaywallPrice(plan, product?.product.priceString, billingState === null).label;
+  const storeName = Platform.OS === 'ios' ? 'the App Store' : 'Google Play';
+  const pricingStatus = billingState === null
+    ? `Fetching localised prices from ${storeName} via RevenueCat…`
+    : billingState.kind === 'expo-go-preview'
+      ? 'Real store prices are available in a native SkinSnap build, not Expo Go.'
+      : billingState.kind === 'unconfigured'
+        ? 'Store prices require a RevenueCat public SDK key for this platform.'
+        : billingState.kind === 'error'
+          ? 'Store prices could not be loaded. Check your connection and RevenueCat setup.'
+          : !selectedPackage
+            ? 'No matching subscription price was returned. Check the RevenueCat offering and Google Play product setup.'
+            : null;
 
   if (downsell && !downsellReady) return <View style={styles.screen} />;
 
@@ -267,49 +321,45 @@ export default function PaywallScreen() {
     <View style={styles.screen}>
       <ScrollView contentContainerStyle={[styles.scroll, { minHeight: height }]} showsVerticalScrollIndicator={false}>
         <View style={[styles.page, { width: Math.min(width, 520), paddingHorizontal: 22 * scale, paddingTop: Math.max(insets.top, 12 * scale), paddingBottom: Math.max(insets.bottom, 20 * scale) + 16 }]}>
-          <Image source={require('../../assets/images/welcome-portrait.png')} style={StyleSheet.absoluteFill} resizeMode="cover" accessible={false} />
-          <LinearGradient colors={['rgba(3,3,7,0.35)', 'rgba(3,3,7,0.79)', 'rgba(3,3,7,0.98)', '#040408']} locations={[0, 0.31, 0.65, 1]} style={StyleSheet.absoluteFill} pointerEvents="none" />
+          <LinearGradient colors={['#101010', '#0A0A0A', '#0A0A0A']} style={StyleSheet.absoluteFill} pointerEvents="none" />
           <View style={[styles.topActions, { marginBottom: 7 * scale }]}>
             <Pressable accessibilityRole="button" accessibilityLabel={downsell ? 'Back and dismiss exclusive offer' : 'Back from subscription offer'} hitSlop={12} onPress={() => void closePaywall()} style={[styles.iconButton, { width: 44 * scale, height: 44 * scale }]}>
               <Svg width={23 * scale} height={23 * scale} viewBox="0 0 24 24" fill="none" stroke="#FFF" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><Path d="m15 18-6-6 6-6" /></Svg>
             </Pressable>
-            <Text style={[styles.brand, { fontSize: 18 * scale }]}>Skin<Text style={styles.pink}>Snap</Text></Text>
+            <Text style={[styles.brand, { fontSize: 18 * scale }]}>SkinSnap</Text>
             <Pressable accessibilityRole="button" accessibilityLabel={downsell ? 'Dismiss exclusive offer' : 'Close subscription offer'} hitSlop={12} onPress={() => void closePaywall()} style={[styles.iconButton, { width: 44 * scale, height: 44 * scale }]}>
               <Svg width={23 * scale} height={23 * scale} viewBox="0 0 24 24" fill="none" stroke="#FFF" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><Path d="m6 6 12 12M18 6 6 18" /></Svg>
             </Pressable>
           </View>
 
-          <View style={[styles.photoGlow, { width: 112 * scale, height: 112 * scale, marginTop: 1 * scale, marginBottom: 8 * scale }]}>
-            <LinearGradient colors={['#FFB0C7', '#FF4381', '#832544']} style={[styles.photoHalo, { borderRadius: 60 * scale, padding: 3 * scale }]}>
-              <View style={[styles.photoInner, { borderRadius: 56 * scale }]}>
-                {activePhotoUri
-                  ? <Image source={{ uri: activePhotoUri }} style={styles.selfie} resizeMode="cover" onError={() => setPhotoUnavailable(true)} accessibilityLabel="Your selected selfie" />
-                  : <Svg width={34 * scale} height={34 * scale} viewBox="0 0 24 24" fill="none" stroke="#FF8EAE" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><Circle cx="12" cy="12" r="9" /><Path d="M8 14s1.5 2 4 2 4-2 4-2m-7-4h.01M15 10h.01" /></Svg>}
-              </View>
-            </LinearGradient>
-            <View pointerEvents="none" style={[styles.glow, { borderRadius: 70 * scale }]} />
-          </View>
+          {activePhotoUri && <View style={[styles.photoPreview, { height: Math.min(180 * scale, height * 0.23), marginBottom: 14 * scale, borderRadius: 22 * scale }]}>
+            <Image source={{ uri: activePhotoUri }} style={styles.selfie} resizeMode="cover" onError={() => setPhotoUnavailable(true)} accessibilityLabel="Your selected selfie" />
+            <View style={styles.photoLabel}><Text style={styles.photoLabelText}>YOUR PHOTO · PRIVATE PREVIEW</Text></View>
+          </View>}
 
-          <Text style={[styles.eyebrow, { fontSize: 10 * scale }]}>{downsell ? 'EXCLUSIVE ONE-TIME OFFER' : 'SKINSNAP PREMIUM'}</Text>
+          <Text style={[styles.eyebrow, { fontSize: 10 * scale }]}>{downsell ? 'ELIGIBLE SUBSCRIPTION OFFER' : 'SKINSNAP PREMIUM'}</Text>
           <Text style={[styles.heading, { fontSize: 28 * scale, lineHeight: 34 * scale, marginTop: 5 * scale }]}>
-            {downsell ? <>A personal insight{'\n'}plan, just for you</> : <>Unlock Your Personal{'\n'}Skin Insights</>}
+            {downsell ? <>A personal insight{'\n'}plan, just for you</> : <>Unlock your full{'\n'}Skin Insights</>}
           </Text>
           <Text style={[styles.subheading, { fontSize: 12.5 * scale, lineHeight: 18 * scale, marginTop: 7 * scale }]}>
-            Full, non-diagnostic skin observations, a personalised routine and progress tracking. Your photo is sent only after the required access check, your consent and your analysis request.
+            Scan your skin · explore routine ideas + optional fragrance inspiration. Photos are processed only after the required access check, your consent and your analysis request.
           </Text>
 
-          <View style={[styles.benefits, { marginTop: 12 * scale, gap: 7 * scale }]}>
+          <Text style={[styles.benefitsHeading, { fontSize: 10 * scale, marginTop: 17 * scale, marginBottom: 8 * scale }]}>WHAT YOU GET</Text>
+          <View style={[styles.benefits, { marginTop: 15 * scale, gap: 12 * scale, padding: 16 * scale, borderRadius: 20 * scale }]}>
             {BENEFITS.map((benefit) => <View key={benefit} style={[styles.benefitRow, { gap: 8 * scale }]}>
               <View style={[styles.check, { width: 17 * scale, height: 17 * scale, borderRadius: 9 * scale }]}><Svg width={10 * scale} height={10 * scale} viewBox="0 0 24 24" fill="none" stroke="#13080D" strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round"><Path d="m4 12 5 5L20 6" /></Svg></View>
               <Text style={[styles.benefitText, { fontSize: 11 * scale, lineHeight: 15 * scale }]}>{benefit}</Text>
             </View>)}
           </View>
 
-          <View style={[styles.plans, { gap: 9 * scale, marginTop: 15 * scale }]}>
-            {(downsell ? ['yearlyDownsell'] as const : ['weekly', 'yearly'] as const).map((plan) => {
+          <View style={[styles.plans, { gap: 10 * scale, marginTop: 17 * scale }]}>
+            {(downsell ? ['yearlyDownsell'] as const : ['weekly', 'monthly', 'yearly'] as const).map((plan) => {
               const product = packages[plan];
               const chosen = selected === plan;
-              const detail = PLAN_DETAILS[plan];
+              const detail = plan === 'yearly' && !downsell && annualSavingsPercent !== null
+                ? { ...PLAN_DETAILS.yearly, badge: `BEST VALUE · SAVE ${annualSavingsPercent}%` }
+                : PLAN_DETAILS[plan];
               return (
                 <Pressable
                   key={plan}
@@ -317,42 +367,44 @@ export default function PaywallScreen() {
                   accessibilityState={{ selected: chosen }}
                   accessibilityLabel={`${detail.name}, ${showStorePrice(plan, product)}, automatically recurring, no free trial`}
                   onPress={() => { if (plan !== 'yearlyDownsell') setSelectedBasePlan(plan); }}
-                  style={[styles.planCard, { minHeight: 70 * scale, borderRadius: 18 * scale, paddingHorizontal: 13 * scale, borderColor: chosen ? '#FF5D91' : '#4C4049', borderWidth: chosen ? 1.6 : 1 }]}
+                  style={[styles.planCard, { minHeight: 78 * scale, borderRadius: 18 * scale, paddingHorizontal: 15 * scale, borderColor: chosen ? '#E8C9A0' : '#383638', borderWidth: chosen ? 1.6 : 1 }]}
                 >
                   {detail.badge && <View style={[styles.badge, { top: -9 * scale, right: 13 * scale, paddingHorizontal: 9 * scale, paddingVertical: 3 * scale, borderRadius: 9 * scale }]}><Text style={[styles.badgeText, { fontSize: 8.5 * scale }]}>{detail.badge}</Text></View>}
-                  <View style={[styles.radio, { width: 23 * scale, height: 23 * scale, borderRadius: 12 * scale, borderWidth: 1.7 * scale, borderColor: chosen ? '#FF6A99' : '#8C7B86' }]}>{chosen && <View style={[styles.radioDot, { width: 13 * scale, height: 13 * scale, borderRadius: 7 * scale }]} />}</View>
                   <View style={styles.planCopy}>
                     <Text style={[styles.planName, { fontSize: 14.5 * scale }]}>{detail.name}</Text>
-                    <Text style={[styles.planTerms, { fontSize: 10 * scale, lineHeight: 15 * scale, marginTop: 3 * scale }]}>
-                      {developmentPreview ? `DEVELOPMENT PREVIEW · ${showStorePrice(plan, product)}` : `${showStorePrice(plan, product)} · auto-renews`}
+                    <Text style={[styles.planPrice, { fontSize: 15 * scale, marginTop: 2 * scale }]}>
+                      {showStorePrice(plan, product)}
+                    </Text>
+                    <Text style={[styles.planTerms, { fontSize: 10 * scale, lineHeight: 15 * scale, marginTop: 2 * scale }]}>
+                      {`Billed ${detail.period}ly · auto-renews`}
                     </Text>
                     {downsell && plan === 'yearlyDownsell' && savingsPercent !== null && standardAnnual && <Text style={[styles.savings, { fontSize: 10 * scale, marginTop: 3 * scale }]}>Standard {standardAnnual.product.priceString}/year · save about {savingsPercent}%</Text>}
                   </View>
+                  <View style={[styles.radio, { width: 23 * scale, height: 23 * scale, borderRadius: 12 * scale, borderWidth: 1.7 * scale, borderColor: chosen ? '#E8C9A0' : '#777477' }]}>{chosen && <View style={[styles.radioDot, { width: 13 * scale, height: 13 * scale, borderRadius: 7 * scale }]} />}</View>
                 </Pressable>
               );
             })}
           </View>
+          {pricingStatus && <Text style={[styles.status, { fontSize: 9.5 * scale, lineHeight: 14 * scale, marginTop: 6 * scale }]}>{pricingStatus}</Text>}
 
           <Pressable
             accessibilityRole="button"
             accessibilityState={{ disabled: !canPurchase || busy }}
             disabled={!canPurchase || busy}
             onPress={() => void buySelectedPlan()}
-            style={[styles.cta, { minHeight: 54 * scale, borderRadius: 29 * scale, marginTop: 13 * scale, opacity: canPurchase && !busy ? 1 : 0.55 }]}
+            style={[styles.cta, { minHeight: 56 * scale, borderRadius: 29 * scale, marginTop: 13 * scale, opacity: canPurchase && !busy ? 1 : 0.55 }]}
           >
-            <LinearGradient colors={['#FFB0C4', '#FF6C9B', '#FF4E88']} style={styles.ctaFill}>
+            <View style={styles.ctaFill}>
               <Text style={[styles.ctaText, { fontSize: 15 * scale }]}>
-                {busy ? 'Connecting securely…' : developmentPreview ? 'Purchases disabled in preview' : selectedPackage ? `Subscribe · ${showStorePrice(selected, selectedPackage)}` : 'Subscription not available'}
+                {busy ? 'Connecting securely…' : !SUBSCRIPTION_PURCHASES_ENABLED ? 'Purchases unavailable in this build' : selectedPackage ? 'Continue' : 'Subscription not available'}
               </Text>
-            </LinearGradient>
+            </View>
           </Pressable>
           <Text style={[styles.disclosure, { fontSize: 9.5 * scale, lineHeight: 14 * scale, marginTop: 6 * scale }]}>
-            No free trial or introductory price. {selected === 'weekly' ? 'Billed weekly' : 'Billed annually'} and automatically renews until cancelled. Cancel in Google Play subscriptions.
+            No free trial or introductory price. Billed {PLAN_DETAILS[selected].period} and automatically renews until cancelled. Cancel in {Platform.OS === 'ios' ? 'your Apple account settings' : 'Google Play subscriptions'}.
           </Text>
           {!canPurchase && <Text style={[styles.status, { fontSize: 9.5 * scale, lineHeight: 14 * scale, marginTop: 5 * scale }]}>
-            {__DEV__ && billingState?.kind === 'expo-go-preview'
-              ? 'Development-only Expo Go billing preview · purchases and premium access are disabled.'
-              : !SUBSCRIPTION_PURCHASES_ENABLED
+            {!SUBSCRIPTION_PURCHASES_ENABLED
                 ? 'Purchases and paid analysis are disabled in this build. You can continue with free skincare tools; no charge or analysis request will occur.'
               : !storeReady
                 ? __DEV__ ? billingState?.message ?? 'Loading Google Play subscription details…' : 'Subscriptions are not available yet. No purchase has been made.'
@@ -372,7 +424,7 @@ export default function PaywallScreen() {
             accessibilityRole="button"
             accessibilityLabel="Run development-only AI analysis test without purchasing"
             onPress={() => router.replace('/analysis')}
-            style={[styles.freeButton, { minHeight: 42 * scale, borderRadius: 22 * scale, marginTop: 7 * scale, borderColor: '#A84B70', borderWidth: 1 }]}
+            style={[styles.freeButton, { minHeight: 42 * scale, borderRadius: 22 * scale, marginTop: 7 * scale, borderColor: '#8A7458', borderWidth: 1 }]}
           >
             <Text style={[styles.freeText, { fontSize: 11.5 * scale }]}>Development-only AI test · no purchase</Text>
           </Pressable>}
@@ -384,7 +436,7 @@ export default function PaywallScreen() {
             <Text style={[styles.freeText, { fontSize: 11.5 * scale }]}>No thanks · continue free</Text>
           </Pressable>}
 
-          <View style={[styles.footer, { marginTop: 11 * scale, gap: 13 * scale }]}>
+          <View style={[styles.footer, { marginTop: 15 * scale, gap: 13 * scale }]}>
             <Pressable accessibilityRole="button" onPress={() => void restore()}><Text style={[styles.link, { fontSize: 9.5 * scale }]}>Restore Purchases</Text></Pressable>
             {!hasSession && developmentTestMode && <Pressable accessibilityRole="link" onPress={() => router.push('/sign-in')}><Text style={[styles.link, { fontSize: 9.5 * scale }]}>Sign in for test</Text></Pressable>}
             <Pressable accessibilityRole="link" onPress={() => void openLegal('terms')}><Text style={[styles.link, { fontSize: 9.5 * scale }]}>Terms</Text></Pressable>
@@ -418,48 +470,48 @@ export default function PaywallScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#040408' },
+  screen: { flex: 1, backgroundColor: '#0A0A0A' },
   scroll: { flexGrow: 1, alignItems: 'center' },
-  page: { flexGrow: 1, overflow: 'hidden', backgroundColor: '#040408', alignItems: 'center' },
+  page: { flexGrow: 1, overflow: 'hidden', backgroundColor: '#0A0A0A', alignItems: 'center' },
   topActions: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  iconButton: { justifyContent: 'center', alignItems: 'center', borderRadius: 24, borderWidth: 1, borderColor: 'rgba(255,255,255,0.27)', backgroundColor: 'rgba(10,8,13,0.45)' },
+  iconButton: { justifyContent: 'center', alignItems: 'center', borderRadius: 24, borderWidth: 1, borderColor: '#343436', backgroundColor: '#1A1A1C' },
   brand: { color: '#FFF', fontFamily: 'InterExtraBold', letterSpacing: -0.7 },
-  pink: { color: '#FF6395' },
-  photoGlow: { justifyContent: 'center', alignItems: 'center' },
-  photoHalo: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', zIndex: 1 },
-  photoInner: { width: '100%', height: '100%', overflow: 'hidden', backgroundColor: '#20131A', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#100A0E' },
+  photoPreview: { width: '100%', maxWidth: 390, overflow: 'hidden', backgroundColor: '#1A1A1C', borderWidth: 1, borderColor: '#363436' },
   selfie: { width: '100%', height: '100%' },
-  glow: { position: 'absolute', width: '130%', height: '130%', backgroundColor: 'rgba(255,63,128,0.13)' },
-  eyebrow: { color: '#FF88AA', fontFamily: 'InterExtraBold', letterSpacing: 1.5, textAlign: 'center' },
+  photoLabel: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 12, paddingVertical: 9, backgroundColor: 'rgba(10,10,10,0.7)' },
+  photoLabelText: { color: '#E8C9A0', fontFamily: 'InterSemibold', fontSize: 9, letterSpacing: 0.8 },
+  eyebrow: { color: '#D4B896', fontFamily: 'InterExtraBold', letterSpacing: 1.5, textAlign: 'center' },
   heading: { maxWidth: 355, color: '#FFF', fontFamily: 'InterExtraBold', textAlign: 'center', letterSpacing: -0.65 },
-  subheading: { maxWidth: 350, color: '#D9D4DD', fontFamily: 'InterRegular', textAlign: 'center' },
-  benefits: { width: '100%', maxWidth: 360 },
+  subheading: { maxWidth: 350, color: '#B9B4B5', fontFamily: 'InterRegular', textAlign: 'center' },
+  benefitsHeading: { color: '#D4B896', fontFamily: 'InterExtraBold', letterSpacing: 1.5, textAlign: 'center' },
+  benefits: { width: '100%', maxWidth: 390, backgroundColor: '#1A1A1C', borderWidth: 1, borderColor: '#2A2A2C' },
   benefitRow: { flexDirection: 'row', alignItems: 'center' },
-  check: { justifyContent: 'center', alignItems: 'center', backgroundColor: '#FF83A8' },
+  check: { justifyContent: 'center', alignItems: 'center', backgroundColor: '#E8C9A0' },
   benefitText: { color: '#F0EBF0', fontFamily: 'InterMedium', flex: 1 },
   plans: { width: '100%', maxWidth: 390 },
-  planCard: { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 11, position: 'relative', backgroundColor: 'rgba(15,13,19,0.91)' },
-  badge: { position: 'absolute', zIndex: 2, backgroundColor: '#FF79A2' },
-  badgeText: { color: '#18080F', fontFamily: 'InterExtraBold', letterSpacing: 0.4 },
+  planCard: { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 11, position: 'relative', backgroundColor: '#1A1A1C', borderWidth: 1, borderColor: '#2A2A2C' },
+  badge: { position: 'absolute', zIndex: 2, backgroundColor: '#E8C9A0' },
+  badgeText: { color: '#181613', fontFamily: 'InterExtraBold', letterSpacing: 0.4 },
   radio: { alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  radioDot: { backgroundColor: '#FF6395' },
-  planCopy: { flex: 1, paddingVertical: 11 },
+  radioDot: { backgroundColor: '#E8C9A0' },
+  planCopy: { flex: 1, paddingVertical: 12 },
   planName: { color: '#FFF', fontFamily: 'InterExtraBold' },
+  planPrice: { color: '#FFF', fontFamily: 'InterExtraBold' },
   planTerms: { color: '#D0C9D2', fontFamily: 'InterRegular' },
-  savings: { color: '#FF9CBA', fontFamily: 'InterSemibold' },
-  cta: { width: '100%', maxWidth: 390, overflow: 'hidden', borderColor: '#FFA7C1', borderWidth: 0.7, boxShadow: '0px 0px 22px 1px rgba(255, 70, 130, 0.34)' },
-  ctaFill: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
-  ctaText: { color: '#12070C', fontFamily: 'InterExtraBold', textAlign: 'center' },
-  disclosure: { maxWidth: 375, color: '#C6BDC9', textAlign: 'center', fontFamily: 'InterRegular' },
-  status: { maxWidth: 370, color: '#FFB1C7', textAlign: 'center', fontFamily: 'InterMedium' },
-  freeButton: { width: '100%', maxWidth: 390, justifyContent: 'center', alignItems: 'center', borderColor: '#5A4753', borderWidth: 1, backgroundColor: 'rgba(18,15,21,0.9)' },
-  freeText: { color: '#E8DCE4', fontFamily: 'InterSemibold' },
+  savings: { color: '#E8C9A0', fontFamily: 'InterSemibold' },
+  cta: { width: '100%', maxWidth: 390, overflow: 'hidden', backgroundColor: '#FFFFFF' },
+  ctaFill: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10, backgroundColor: '#FFFFFF' },
+  ctaText: { color: '#171717', fontFamily: 'InterExtraBold', textAlign: 'center' },
+  disclosure: { maxWidth: 375, color: '#A9A3A4', textAlign: 'center', fontFamily: 'InterRegular' },
+  status: { maxWidth: 370, color: '#E8C9A0', textAlign: 'center', fontFamily: 'InterMedium' },
+  freeButton: { width: '100%', maxWidth: 390, justifyContent: 'center', alignItems: 'center', borderColor: '#3B3837', borderWidth: 1, backgroundColor: '#151516' },
+  freeText: { color: '#D8D2CE', fontFamily: 'InterSemibold' },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
-  link: { color: '#E5DDE6', fontFamily: 'InterMedium', textDecorationLine: 'underline' },
-  footerNote: { maxWidth: 365, textAlign: 'center', color: '#B0A7B3', fontFamily: 'InterRegular' },
+  link: { color: '#C6BBAF', fontFamily: 'InterMedium', textDecorationLine: 'underline' },
+  footerNote: { maxWidth: 365, textAlign: 'center', color: '#868182', fontFamily: 'InterRegular' },
   modalBackdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: 'rgba(0,0,0,0.82)' },
-  modalCard: { width: '100%', maxWidth: 360, padding: 24, gap: 18, backgroundColor: '#181016', borderRadius: 24, borderWidth: 1, borderColor: '#773049' },
+  modalCard: { width: '100%', maxWidth: 360, padding: 24, gap: 18, backgroundColor: '#1A1A1C', borderRadius: 24, borderWidth: 1, borderColor: '#3B3736' },
   modalTitle: { color: '#FFF', fontFamily: 'InterSemibold', fontSize: 15, lineHeight: 22 },
   dismissButton: { alignItems: 'center', padding: 10 },
-  dismissButtonText: { color: '#FF92B4', fontFamily: 'InterExtraBold', fontSize: 14 },
+  dismissButtonText: { color: '#E8C9A0', fontFamily: 'InterExtraBold', fontSize: 14 },
 });

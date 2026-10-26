@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { SkinAnalysisResult } from './services/analysisApi';
-import type { AnalysisPreferences } from './analysisQuality';
+import type { AnalysisCaptureView, AnalysisPreferences } from './analysisQuality';
 import { PHOTO_ANALYSIS_CONSENT_VERSION, isCurrentPhotoAnalysisConsent } from './privacy';
 
 type PhotoState = {
@@ -8,6 +8,8 @@ type PhotoState = {
   acceptAnalysisResult: (key: string, result: SkinAnalysisResult) => boolean;
   analysisPreferences: AnalysisPreferences;
   setAnalysisPreferences: (preferences: AnalysisPreferences) => void;
+  photoView: AnalysisCaptureView;
+  setPhotoView: (view: AnalysisCaptureView) => void;
   photoUri: string | null;
   setPhotoUri: (uri: string | null) => void;
   photoUploadConsent: boolean;
@@ -20,6 +22,7 @@ const PhotoContext = createContext<PhotoState | null>(null);
 
 export function PhotoProvider({ children }: { children: ReactNode }) {
   const [analysisPreferences, setAnalysisPreferences] = useState<AnalysisPreferences>({});
+  const [photoView, setPhotoView] = useState<AnalysisCaptureView>('front');
   const [photoUri, updatePhotoUri] = useState<string | null>(null);
   const [analysisRequestKey, setAnalysisRequestKey] = useState<string | null>(null);
   const selectedRequestKey = useRef<string | null>(null);
@@ -45,6 +48,8 @@ export function PhotoProvider({ children }: { children: ReactNode }) {
     acceptAnalysisResult,
     analysisPreferences,
     setAnalysisPreferences,
+    photoView,
+    setPhotoView,
     photoUri,
     setPhotoUri,
     photoUploadConsent,
@@ -52,7 +57,7 @@ export function PhotoProvider({ children }: { children: ReactNode }) {
     setPhotoUploadConsent,
     analysisResult,
     setAnalysisResult,
-  }), [acceptAnalysisResult, analysisRequestKey, analysisPreferences, analysisResult, photoUri, photoUploadConsent, photoUploadConsentVersion, setPhotoUri]);
+  }), [acceptAnalysisResult, analysisRequestKey, analysisPreferences, photoView, analysisResult, photoUri, photoUploadConsent, photoUploadConsentVersion, setPhotoUri]);
   return <PhotoContext.Provider value={value}>{children}</PhotoContext.Provider>;
 }
 

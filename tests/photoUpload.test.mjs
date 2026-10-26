@@ -69,8 +69,8 @@ test('analysis request timeout includes upload and the configured full upstream 
   const noUpload = analysisRequestTimeoutMs(0, MAX_PREPARED_PHOTO_BYTES);
   const maxUpload = analysisRequestTimeoutMs(MAX_PREPARED_PHOTO_BYTES, MAX_PREPARED_PHOTO_BYTES);
 
-  assert.equal(noUpload, 120_000);
-  assert.equal(maxUpload, 216_000);
+  assert.equal(noUpload, 135_000);
+  assert.equal(maxUpload, 231_000);
   assert.ok(maxUpload > noUpload);
   assert.ok(Number.isFinite(analysisRequestTimeoutMs(Number.NaN, MAX_PREPARED_PHOTO_BYTES)));
 });

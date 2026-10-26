@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseSavedPreferences, parseCustomRoutine, parseDiaryEntry, restoreDiaryEntry, routineFromAnalysis, scheduledSteps, diaryWeekSummary, isLocalDate } from '../src/retention.ts';
-import { assessCapture } from '../src/smartCapture.ts';
+import { assessCapture, getCaptureGuideWidth, isOverexposed } from '../src/smartCapture.ts';
 import { retentionRoute } from '../worker/src/retention.ts';
 import worker from '../worker/src/index.ts';
 import fs from 'node:fs';
@@ -9,11 +9,46 @@ import fs from 'node:fs';
 const entry = (date = '2026-10-24') => ({ date, timeZone: 'Africa/Lagos', note: '', products: '', concerns: [], morningCompleted: false, eveningCompleted: true });
 test('capture permits ordinary images and mild warnings but blocks unusable inputs', () => {
   assert.equal(assessCapture(1080, 1440, 300000, 'image/jpeg').usable, true);
-  assert.ok(assessCapture(200, 250, 1000).warnings.length);
-  assert.equal(assessCapture(200, 250, 1000).usable, true);
+  assert.equal(assessCapture(600, 800, 1000).usable, false);
+  assert.match(assessCapture(600, 800, 1000).message, /Move closer/);
+  assert.equal(assessCapture(601, 800, 1000).usable, true);
   for (const args of [[0, 10, 100], [10, 10, 0], [NaN, 10, 100], [1080, 1440, 1000, 'image/gif'], [1000, 1000, 33 * 1024 * 1024]]) assert.equal(assessCapture(...args).usable, false);
   assert.deepEqual(assessCapture(1200, 800, 1000).warnings, []); // landscape is not a face-detection failure
   assert.equal(assessCapture(1440, 1080, 1000, 'image/heic').usable, true);
+});
+test('exposure check blocks broadly clipped white areas but not naturally bright or mixed lighting', () => {
+  const pixels = (clippedFraction) => {
+    const data = new Uint8Array(64 * 64 * 4);
+    for (let index = 0; index < data.length; index += 4) {
+      data[index] = 180;
+      data[index + 1] = 150;
+      data[index + 2] = 140;
+      data[index + 3] = 255;
+    }
+    const sampleWidth = 46;
+    const sampleHeight = 52;
+    const count = Math.floor(sampleWidth * sampleHeight * clippedFraction);
+    for (let index = 0; index < count; index++) {
+      const x = 9 + index % sampleWidth;
+      const y = 6 + Math.floor(index / sampleWidth);
+      const offset = (y * 64 + x) * 4;
+      data[offset] = data[offset + 1] = data[offset + 2] = 255;
+    }
+    return data;
+  };
+  assert.equal(isOverexposed(pixels(0.34), 64, 64), false);
+  assert.equal(isOverexposed(pixels(0.36), 64, 64), true);
+  assert.throws(() => isOverexposed(new Uint8Array(3), 1, 1), /invalid-sampled-image/);
+});
+test('camera oval scales to the available live-preview area without overflowing', () => {
+  assert.equal(getCaptureGuideWidth(393, 440), 300);
+  assert.equal(getCaptureGuideWidth(320, 330), 235.5);
+  assert.equal(getCaptureGuideWidth(320, 120), 78);
+  assert.equal(getCaptureGuideWidth(393, 440, 36), 264);
+  assert.equal(getCaptureGuideWidth(320, 120, 12), 60);
+  assert.equal(getCaptureGuideWidth(320, 120, -12), 78);
+  assert.equal(getCaptureGuideWidth(320, 16), 0);
+  assert.equal(getCaptureGuideWidth(Number.NaN, 400), 0);
 });
 test('preferences require permission, allow skipped fields and reject unsupported values', () => {
   assert.deepEqual(parseSavedPreferences({ consent: true, preferences: {} }), { consent: true, preferences: {} });

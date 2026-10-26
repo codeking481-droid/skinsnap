@@ -5,6 +5,7 @@ import {
   BackHandler,
   Image,
   Linking,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -21,24 +22,17 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { usePhoto } from '../PhotoContext';
 import { backOrReplace } from '../navigation';
 import { inspectCapture } from '../services/captureQuality';
-import type { CaptureCheck } from '../smartCapture';
+import { getCaptureGuideWidth, type CaptureCheck } from '../smartCapture';
 import { loadSkinPreferences } from '../services/retentionApi';
-import { PHOTO_ANALYSIS_CONSENT_VERSION } from '../privacy';
+import { isAdultEligibilityConfirmed, MINIMUM_USER_AGE, PHOTO_ANALYSIS_CONSENT_VERSION } from '../privacy';
+import { loadPreferences } from '../preferences';
 import { AnalysisPreferencesForm } from '../components/AnalysisPreferencesForm';
-
-function FaceGuide({ size }: { size: number }) {
-  return (
-    <View pointerEvents="none" style={[styles.faceGuideWrap, { width: size, height: size * 1.18, borderRadius: size * 0.54 }]}>
-      <View style={[styles.faceGuide, { width: size, height: size * 1.18, borderRadius: size * 0.54 }]} />
-      <View pointerEvents="none" style={[styles.faceGuideLine, { width: size * 0.66, top: size * 0.74 }]} />
-    </View>
-  );
-}
 
 export default function UploadScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const { photoUri, setPhotoUri, photoUploadConsent, setPhotoUploadConsent, setAnalysisResult, analysisPreferences, setAnalysisPreferences } = usePhoto();
+  const scale = Math.max(0.9, Math.min(Math.min(width, 520) / 393, 1.08));
+  const { photoUri, setPhotoUri, photoUploadConsent, setPhotoUploadConsent, setAnalysisResult, analysisPreferences, setAnalysisPreferences, photoView, setPhotoView } = usePhoto();
   const [permission, requestPermission] = useCameraPermissions();
   const [refreshedPermission, setRefreshedPermission] = useState<typeof permission>(null);
   const cameraPermission = refreshedPermission ?? permission;
@@ -49,11 +43,60 @@ export default function UploadScreen() {
   const [isCapturing, setIsCapturing] = useState(false);
   const [photoConsent, setPhotoConsent] = useState(photoUploadConsent);
   const [previewAspectRatio, setPreviewAspectRatio] = useState(0.76);
+  const [showScanInfo, setShowScanInfo] = useState(false);
+  const [screenFocused, setScreenFocused] = useState(true);
+  const [ageGateReady, setAgeGateReady] = useState(false);
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
+  const [cameraReady, setCameraReady] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isSwitchingCamera, setIsSwitchingCamera] = useState(false);
+  const [cameraAttempt, setCameraAttempt] = useState(0);
+  const [lightingConfirmed, setLightingConfirmed] = useState(false);
+  const [framingConfirmed, setFramingConfirmed] = useState(false);
+  const [headerHeight, setHeaderHeight] = useState(76 * scale);
+  const [footerHeight, setFooterHeight] = useState(210 * scale);
   const cameraRef = useRef<CameraView>(null);
-  const scale = Math.max(0.9, Math.min(Math.min(width, 520) / 393, 1.08));
-  const guideSize = Math.min(width - 96, 276) * (width < 380 ? 0.88 : 1);
+  const captureInProgress = useRef(false);
+  const hasFocusedBefore = useRef(false);
+  const cameraAreaHeight = Math.max(0, height - headerHeight - footerHeight);
+  const guideOffset = Math.min(62 * scale, Math.max(18 * scale, cameraAreaHeight * 0.12));
+  const guideSize = getCaptureGuideWidth(width, cameraAreaHeight, guideOffset) * 1.06;
   const previewWidth = Math.min(width - insets.left - insets.right - 40, 420);
   const previewHeight = Math.min(previewWidth / previewAspectRatio, Math.max(150, height * 0.38), 380);
+
+  useFocusEffect(useCallback(() => {
+    setScreenFocused(true);
+    setCameraReady(false);
+    setIsSwitchingCamera(false);
+    if (hasFocusedBefore.current) setCameraAttempt(current => current + 1);
+    hasFocusedBefore.current = true;
+    return () => {
+      setScreenFocused(false);
+      setCameraReady(false);
+      setIsSwitchingCamera(false);
+    };
+  }, []));
+
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    setAgeGateReady(false);
+    void loadPreferences().then(preferences => {
+      if (!active) return;
+      if (!preferences.onboardingComplete || !isAdultEligibilityConfirmed(preferences.ageConfirmed)) {
+        router.replace('/onboarding');
+        return;
+      }
+      setAgeGateReady(true);
+    }).catch(() => {
+      if (!active) return;
+      Alert.alert('Age eligibility unavailable', 'Confirm that you are 18 or older in onboarding before using Scan.');
+      router.replace('/onboarding');
+    });
+    return () => {
+      active = false;
+      setAgeGateReady(false);
+    };
+  }, []));
 
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -80,13 +123,31 @@ export default function UploadScreen() {
   }, [photoUri]);
 
   useEffect(() => {
+    let wasActive = AppState.currentState === 'active';
     const subscription = AppState.addEventListener('change', (state) => {
+      const active = state === 'active';
+      setAppActive(active);
+      if (!active) {
+        setCameraReady(false);
+        setIsSwitchingCamera(false);
+      }
       if (state === 'active') {
+        if (!wasActive) setCameraAttempt(current => current + 1);
         void Camera.getCameraPermissionsAsync().then(setRefreshedPermission).catch(() => undefined);
       }
+      wasActive = active;
     });
     return () => subscription.remove();
   }, []);
+
+  useEffect(() => {
+    if (!ageGateReady || !screenFocused || !appActive || !cameraPermission?.granted || photoUri || cameraError || cameraReady) return;
+    const timeout = setTimeout(() => {
+      setIsSwitchingCamera(false);
+      setCameraError('The camera is taking longer than expected to start. Try again or choose a photo from your gallery.');
+    }, 15_000);
+    return () => clearTimeout(timeout);
+  }, [ageGateReady, appActive, cameraError, cameraPermission?.granted, cameraReady, photoUri, screenFocused]);
 
   useFocusEffect(
     useCallback(() => {
@@ -96,6 +157,7 @@ export default function UploadScreen() {
           setPhotoUploadConsent(false);
           setAnalysisResult(null);
           setPhotoConsent(false);
+          setFramingConfirmed(false);
           return true;
         }
         void backOrReplace('/');
@@ -107,14 +169,24 @@ export default function UploadScreen() {
 
   const validateSelectedPhoto = async (uri: string) => {
     try {
+      const eligibility = await loadPreferences();
+      if (!eligibility.onboardingComplete || !isAdultEligibilityConfirmed(eligibility.ageConfirmed)) {
+        Alert.alert(`${MINIMUM_USER_AGE}+ age requirement`, `SkinSnap is available only to people aged ${MINIMUM_USER_AGE} or older.`);
+        router.replace('/onboarding');
+        return;
+      }
       if (!quality || quality.uri !== uri) { Alert.alert('Checking your photo', 'Wait for the local photo check to finish.'); return; }
       if (!quality.check.usable) { Alert.alert('Choose another photo', quality.check.message); return; }
+      if (!framingConfirmed) { Alert.alert('Check your framing', 'Make sure your face fills more than 40% of the guide and is clearly visible before continuing.'); return; }
       if (!photoConsent) {
         Alert.alert('Consent needed', 'Please confirm that your photo may be securely processed when you request an authorized analysis.');
         return;
       }
 
-      const proceed = () => { setPhotoUploadConsent(true); router.push('/paywall'); };
+      const proceed = () => {
+        setPhotoUploadConsent(true);
+        router.push({ pathname: '/paywall', params: { next: 'analysis' } });
+      };
       if (quality.check.warnings.length) Alert.alert('A retake may help', quality.check.message, [{ text: 'Retake', onPress: retakePhoto }, { text: 'Use this photo', onPress: proceed }]);
       else proceed();
     } catch {
@@ -123,7 +195,8 @@ export default function UploadScreen() {
   };
 
   const takePhoto = async () => {
-    if (isCapturing || !cameraRef.current) return;
+    if (!ageGateReady || captureInProgress.current || isCapturing || !cameraReady || !cameraRef.current) return;
+    captureInProgress.current = true;
     setIsCapturing(true);
     try {
       const photo = await cameraRef.current.takePictureAsync({ quality: 0.9, skipProcessing: false, exif: false });
@@ -131,8 +204,10 @@ export default function UploadScreen() {
         Alert.alert('Camera capture failed', 'Please try again or choose a photo from your gallery.');
         return;
       }
+      setCameraReady(false);
       setPhotoMime('image/jpeg');
       setQuality(null);
+      setFramingConfirmed(false);
       setPhotoUri(photo.uri);
       setAnalysisResult(null);
       setPhotoUploadConsent(false);
@@ -141,7 +216,17 @@ export default function UploadScreen() {
       Alert.alert('Camera unavailable', 'Please try again or switch to a gallery photo instead.');
     } finally {
       setIsCapturing(false);
+      captureInProgress.current = false;
     }
+  };
+
+  const flipCamera = () => {
+    if (captureInProgress.current || isCapturing || isSwitchingCamera) return;
+    setCameraReady(false);
+    setCameraError(null);
+    setIsSwitchingCamera(true);
+    setFlash('off');
+    setFacing(current => current === 'front' ? 'back' : 'front');
   };
 
   const chooseFromGallery = async () => {
@@ -153,8 +238,10 @@ export default function UploadScreen() {
       });
 
       if (result.canceled || !result.assets?.[0]?.uri) return;
+      setCameraReady(false);
       setPhotoMime(result.assets[0].mimeType);
       setQuality(null);
+      setFramingConfirmed(false);
       setPhotoUri(result.assets[0].uri);
       setPhotoUploadConsent(false);
       setAnalysisResult(null);
@@ -170,16 +257,32 @@ export default function UploadScreen() {
   };
 
   const retakePhoto = () => {
+    setCameraReady(false);
+    setCameraError(null);
     setPhotoUri(null);
     setPhotoUploadConsent(false);
     setAnalysisResult(null);
     setPhotoConsent(false);
+    setFramingConfirmed(false);
   };
+
+  if (!ageGateReady) {
+    return (
+      <View style={styles.screen}>
+        <LinearGradient colors={['#151515', '#0A0A0A']} style={StyleSheet.absoluteFill} />
+        <View style={[styles.permissionCard, { width: Math.min(width - 32, 360), paddingTop: Math.max(insets.top, 24), paddingBottom: 28 }]}>
+          <Text style={[styles.permissionEyebrow, { fontSize: 12 * scale }]}>18+ age requirement</Text>
+          <Text style={[styles.permissionTitle, { fontSize: 24 * scale, lineHeight: 31 * scale }]}>Checking your eligibility</Text>
+          <Text style={[styles.permissionText, { fontSize: 14 * scale, lineHeight: 20 * scale }]}>Confirm that you are at least 18 in onboarding before using Scan.</Text>
+        </View>
+      </View>
+    );
+  }
 
   if (!photoUri && !cameraPermission) {
     return (
       <View style={styles.screen}>
-        <LinearGradient colors={['#090B10', '#120C12', '#050609']} style={StyleSheet.absoluteFill} />
+        <LinearGradient colors={['#151515', '#0A0A0A']} style={StyleSheet.absoluteFill} />
         <View style={[styles.permissionCard, { width: Math.min(width - 32, 360), paddingTop: Math.max(insets.top, 24), paddingBottom: 28 }]}>
           <Text style={[styles.permissionEyebrow, { fontSize: 12 * scale }]}>Choose a photo</Text>
           <Text style={[styles.permissionTitle, { fontSize: 28 * scale, lineHeight: 34 * scale }]}>Use any clear image</Text>
@@ -198,7 +301,7 @@ export default function UploadScreen() {
   if (!photoUri && cameraPermission && !cameraPermission.granted) {
     return (
       <View style={styles.screen}>
-        <LinearGradient colors={['#090B10', '#120C12', '#050609']} style={StyleSheet.absoluteFill} />
+        <LinearGradient colors={['#151515', '#0A0A0A']} style={StyleSheet.absoluteFill} />
         <View style={[styles.permissionCard, { width: Math.min(width - 32, 360), paddingTop: Math.max(insets.top, 24), paddingBottom: 28 }]}>
           <Text style={[styles.permissionEyebrow, { fontSize: 12 * scale }]}>Camera access</Text>
           <Text style={[styles.permissionTitle, { fontSize: 28 * scale, lineHeight: 34 * scale }]}>Allow SkinSnap to { '\n' }access your camera</Text>
@@ -226,7 +329,7 @@ export default function UploadScreen() {
   if (photoUri) {
     return (
       <View style={styles.screen}>
-        <LinearGradient colors={['#090B10', '#120C12', '#050609']} style={StyleSheet.absoluteFill} />
+        <LinearGradient colors={['#151515', '#0A0A0A']} style={StyleSheet.absoluteFill} />
         <SafeAreaView style={styles.previewSafeArea} edges={['top', 'bottom', 'left', 'right']}>
         <ScrollView
           style={styles.previewScroll}
@@ -254,11 +357,21 @@ export default function UploadScreen() {
           </View>
 
           <View style={styles.previewTips}>
-            <Text style={styles.tipsTitle}>Photo quality guide</Text>
-            <Text style={styles.tipsBody}>Face a window for soft, even light. Keep your phone steady, avoid strong shadows and heavy beauty filters.{ '\n' }This screen does not detect faces; choose a photo where your face is clearly visible.</Text>
+            <Text style={styles.previewTipsTitle}>Photo quality guide</Text>
+            <Text style={styles.previewTipsBody}>Face a window for soft, even light. Keep your phone steady, avoid strong shadows and heavy beauty filters.{ '\n' }The oval is a guide, not automatic face detection.</Text>
           </View>
 
-          <View style={styles.previewTips}><Text accessibilityLiveRegion="polite" style={styles.tipsBody}>{quality?.uri === photoUri ? quality.check.message : 'Checking this file locally...'}</Text></View>
+          <View style={styles.previewTips}><Text accessibilityLiveRegion="polite" style={styles.previewTipsBody}>{quality?.uri === photoUri ? quality.check.message : 'Checking this file locally...'}</Text></View>
+          <Pressable
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: framingConfirmed }}
+            accessibilityLabel="Confirm my face fills more than 40 percent of the guide and is clearly visible"
+            onPress={() => setFramingConfirmed(value => !value)}
+            style={styles.consentRow}
+          >
+            <View style={[styles.checkbox, framingConfirmed && styles.checkboxActive]}>{framingConfirmed && <Text style={styles.checkmark}>✓</Text>}</View>
+            <Text style={styles.consentText}>I confirm my face fills more than 40% of the guide and is clearly visible.</Text>
+          </Pressable>
           <Pressable accessibilityRole="button" onPress={() => router.push('/skin-preferences')} style={styles.secondaryButton}><Text style={styles.secondaryButtonText}>My Skin Preferences</Text></Pressable>
           <AnalysisPreferencesForm value={analysisPreferences} onChange={setAnalysisPreferences} />
           <Pressable
@@ -279,9 +392,9 @@ export default function UploadScreen() {
           </View>
 
           <View style={styles.previewActions}>
-            <Pressable accessibilityRole="button" onPress={useSelectedPhoto} disabled={quality?.uri !== photoUri || !quality.check.usable} accessibilityState={{ disabled: quality?.uri !== photoUri || !quality.check.usable }} style={[styles.primaryButton, (quality?.uri !== photoUri || !quality.check.usable) && { opacity: 0.45 }]}>
-              <LinearGradient colors={['#FFB2C9', '#FF6DA5', '#FF6C9D']} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={StyleSheet.absoluteFill} />
-              <Text style={styles.primaryButtonText}>Use This Photo</Text>
+            <Pressable accessibilityRole="button" onPress={useSelectedPhoto} disabled={quality?.uri !== photoUri || !quality.check.usable || !framingConfirmed} accessibilityState={{ disabled: quality?.uri !== photoUri || !quality.check.usable || !framingConfirmed }} style={[styles.primaryButton, (quality?.uri !== photoUri || !quality.check.usable || !framingConfirmed) && { opacity: 0.45 }]}>
+              <LinearGradient colors={['#E8C9A0', '#D4B896']} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={StyleSheet.absoluteFill} />
+              <Text style={styles.primaryButtonText}>Continue to scan</Text>
             </Pressable>
             <Pressable accessibilityRole="button" onPress={retakePhoto} style={styles.secondaryButton}>
               <Text style={styles.secondaryButtonText}>Retake</Text>
@@ -298,87 +411,168 @@ export default function UploadScreen() {
     <View style={styles.screen}>
       <CameraView
         ref={cameraRef}
+        key={`${facing}-${cameraAttempt}`}
         style={StyleSheet.absoluteFill}
+        active={screenFocused && appActive && Boolean(cameraPermission?.granted) && !photoUri && !cameraError}
         facing={facing}
         flash={flash}
-        ratio="4:3"
-        onCameraReady={() => undefined}
-        mirror
+        onCameraReady={() => {
+          setCameraError(null);
+          setIsSwitchingCamera(false);
+          setCameraReady(true);
+        }}
+        onMountError={event => {
+          setCameraReady(false);
+          setIsSwitchingCamera(false);
+          setCameraError(event.message || 'The camera could not start.');
+        }}
+        mirror={facing === 'front'}
       />
 
-      <LinearGradient colors={['rgba(9,10,15,0.32)', 'rgba(9,10,15,0.18)', 'rgba(9,10,15,0.78)']} style={StyleSheet.absoluteFill} pointerEvents="none" />
-
-      <View style={[styles.cameraTop, { paddingTop: Math.max(insets.top, 16), paddingHorizontal: 18 * scale }]}>
-        <Pressable accessibilityRole="button" onPress={() => backOrReplace('/')} style={[styles.iconButton, { width: 42 * scale, height: 42 * scale }]}>
+      <View onLayout={event => {
+        const measured = event.nativeEvent.layout.height;
+        setHeaderHeight(current => Math.abs(current - measured) > 1 ? measured : current);
+      }} style={[styles.scanHeader, { paddingTop: Math.max(insets.top, 8), paddingHorizontal: 16 * scale, minHeight: 64 * scale }]}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Back to home" onPress={() => backOrReplace('/')} style={[styles.scanHeaderSide, { width: 42 * scale, height: 42 * scale }]}>
           <Svg width={22 * scale} height={22 * scale} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><Path d="m15 18-6-6 6-6" /></Svg>
         </Pressable>
+        <View style={styles.scanHeaderTitle}>
+          <Text style={[styles.scanBrand, { fontSize: 22 * scale }]}>Scan your glow</Text>
+        </View>
+        <Pressable accessibilityRole="button" accessibilityLabel="About your skin scan" onPress={() => setShowScanInfo(true)} style={[styles.scanHeaderSide, { width: 42 * scale, height: 42 * scale }]}>
+          <Text style={styles.infoGlyph}>i</Text>
+        </Pressable>
+      </View>
 
-        <View style={styles.cameraActionsRight}>
-          <Pressable accessibilityRole="button" onPress={() => setFlash((current) => (current === 'off' ? 'on' : 'off'))} style={[styles.iconButton, { width: 42 * scale, height: 42 * scale }]}>
-            <Svg width={20 * scale} height={20 * scale} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
-              <Path d="M12 2 5 13h5l-1 9 9-13h-5l2-7Z" />
-            </Svg>
+      <View style={[styles.cameraCenter, { top: headerHeight + 24 * scale, bottom: footerHeight + 10 * scale, transform: [{ translateY: guideOffset }] }]} pointerEvents="none">
+        {cameraError
+          ? <View style={[styles.cameraErrorCard, { maxWidth: Math.min(width - 40, 340), padding: 16 * scale, borderRadius: 18 * scale }]}>
+            <Text style={[styles.cameraErrorTitle, { fontSize: 15 * scale }]}>Camera unavailable</Text>
+            <Text style={[styles.cameraErrorText, { fontSize: 11 * scale, lineHeight: 16 * scale }]}>{cameraError}</Text>
+          </View>
+          : <View style={[styles.faceGuide, {
+            width: guideSize,
+            height: guideSize * (4 / 3),
+            borderRadius: guideSize / 2,
+            borderWidth: Math.max(3, 4 * scale),
+            opacity: cameraReady ? 1 : 0.72,
+          }]} />}
+        </View>
+
+      <View onLayout={event => {
+        const measured = event.nativeEvent.layout.height;
+        setFooterHeight(current => Math.abs(current - measured) > 1 ? measured : current);
+      }} style={[styles.cameraFooter, { paddingBottom: Math.max(insets.bottom, 10) + 5, paddingHorizontal: 17 * scale }]}>
+        <Text style={[styles.helperText, { fontSize: 13 * scale, lineHeight: 19 * scale }]}>
+          {photoView === 'side' ? 'Turn gently to one side • Keep your cheek inside the oval' : 'Look straight at the camera • Fit your head inside the oval'}
+        </Text>
+        <View accessibilityRole="radiogroup" accessibilityLabel="Choose face angle" style={[styles.captureViews, { marginTop: 7 * scale, gap: 8 * scale }]}>
+          {(['front', 'side'] as const).map(view => (
+            <Pressable
+              key={view}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: photoView === view }}
+              accessibilityLabel={view === 'front' ? 'Capture front view' : 'Capture side profile'}
+              onPress={() => setPhotoView(view)}
+              style={[styles.captureViewOption, photoView === view && styles.captureViewOptionSelected, { minHeight: 32 * scale, paddingHorizontal: 14 * scale }]}
+            >
+              <Text style={[styles.captureViewText, photoView === view && styles.captureViewTextSelected, { fontSize: 10 * scale }]}>
+                {view === 'front' ? 'Front view' : 'Side profile'}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        <View style={[styles.readinessChips, { marginTop: 5 * scale, gap: 10 * scale }]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: lightingConfirmed }}
+            accessibilityLabel={lightingConfirmed ? 'Good light confirmed' : 'Confirm good lighting'}
+            onPress={() => setLightingConfirmed(value => !value)}
+            style={[styles.readinessChip, lightingConfirmed && styles.readinessChipSelected, { paddingHorizontal: 10 * scale, minHeight: 28 * scale }]}
+          >
+            <Text style={[styles.readinessChipText, lightingConfirmed && styles.readinessChipTextSelected, { fontSize: 9.5 * scale }]}>{lightingConfirmed ? '✓ Good light' : 'Good light'}</Text>
           </Pressable>
-          <Pressable accessibilityRole="button" onPress={() => setFacing((current) => (current === 'front' ? 'back' : 'front'))} style={[styles.switchButton, { width: 42 * scale, height: 42 * scale }]}>
-            <Svg width={20 * scale} height={20 * scale} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round"><Path d="M9 5H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3m6-14h3a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-3M8 12h8M15 9V7m0 10v-2" /></Svg>
-          </Pressable>
+          <Text style={[styles.readinessHint, { fontSize: 10 * scale }]}>No glasses</Text>
+          <Text style={[styles.readinessHint, { fontSize: 10 * scale }]}>Hair back</Text>
+        </View>
+        <Pressable accessibilityRole="button" accessibilityState={{ disabled: isCapturing || !cameraReady }} onPress={takePhoto} disabled={isCapturing || !cameraReady} style={[styles.captureButton, { minHeight: 68 * scale, borderRadius: 36 * scale, marginTop: 8 * scale, opacity: isCapturing || !cameraReady ? 0.65 : 1 }]}>
+            <Svg width={22 * scale} height={22 * scale} viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><Path d="M4 8h3l2-3h6l2 3h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z" /><Circle cx="12" cy="13" r="4" /></Svg>
+            <Text style={[styles.captureLabel, { fontSize: 18 * scale }]}>{isCapturing ? 'Capturing…' : cameraError ? 'Camera unavailable' : isSwitchingCamera ? 'Switching camera…' : cameraReady ? 'Capture' : 'Starting camera…'}</Text>
+        </Pressable>
+        <View style={[styles.captureFooter, { marginTop: 3 * scale }]}>
+            <Pressable accessibilityRole="button" onPress={chooseFromGallery} style={styles.galleryLink}><Text style={styles.galleryLinkText}>Choose from gallery</Text></Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel={isSwitchingCamera ? 'Switching camera' : facing === 'front' ? 'Switch to rear camera' : 'Switch to front camera'} accessibilityState={{ disabled: isCapturing || isSwitchingCamera }} disabled={isCapturing || isSwitchingCamera} onPress={flipCamera} style={styles.cameraUtility}><Text style={styles.utilityText}>{isSwitchingCamera ? 'Switching…' : 'Flip camera'}</Text></Pressable>
+            {facing === 'back' && <Pressable accessibilityRole="button" onPress={() => setFlash(current => current === 'off' ? 'on' : 'off')} style={styles.cameraUtility}><Text style={styles.utilityText}>{flash === 'off' ? 'Flash off' : 'Flash on'}</Text></Pressable>}
+            {cameraError && <Pressable accessibilityRole="button" onPress={() => {
+              setCameraError(null);
+              setCameraReady(false);
+              setIsSwitchingCamera(false);
+              setCameraAttempt(current => current + 1);
+            }} style={styles.cameraUtility}><Text style={styles.utilityText}>Try again</Text></Pressable>}
         </View>
       </View>
 
-      <View style={styles.cameraCenter} pointerEvents="none">
-        <View style={[styles.faceGuideShell, { width: guideSize, height: guideSize * 1.2, borderRadius: guideSize * 0.5 }]}>
-          <FaceGuide size={guideSize} />
-        </View>
-      </View>
-
-      <View style={[styles.cameraFooter, { paddingBottom: insets.bottom + 24 }]}>
-        <Text style={[styles.helperText, { fontSize: 13 * scale, lineHeight: 18 * scale }]}>Position your face inside the frame.</Text>
-        <View style={[styles.cameraControls, { width: Math.min(width - 40, 420), marginTop: 12 * scale }]}>
-          <Pressable accessibilityRole="button" onPress={chooseFromGallery} style={[styles.galleryButton, { width: 64 * scale, height: 64 * scale, borderRadius: 22 * scale }]}>
-            <Svg width={28 * scale} height={28 * scale} viewBox="0 0 24 24" fill="none" stroke="#0A090D" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
-              <Path d="M4 5h16v14H4zM4 16l4-4 4 4 3-3 5 5" /><Circle cx="9" cy="9" r="1.5" fill="#0A090D" stroke="none" />
-            </Svg>
-          </Pressable>
-
-          <Pressable accessibilityRole="button" onPress={takePhoto} disabled={isCapturing} style={[styles.shutterButton, { width: 86 * scale, height: 86 * scale, borderRadius: 43 * scale, opacity: isCapturing ? 0.7 : 1 }]}>
-            <LinearGradient colors={['#FFB7CE', '#FF73A7', '#FF5C96']} style={StyleSheet.absoluteFill} />
-            <View style={[styles.shutterInner, { width: 62 * scale, height: 62 * scale, borderRadius: 31 * scale }]} />
-          </Pressable>
-
-          <View style={[styles.galleryButton, { width: 64 * scale, height: 64 * scale, borderRadius: 22 * scale, opacity: 0.35 }]} pointerEvents="none">
-            <Svg width={28 * scale} height={28 * scale} viewBox="0 0 24 24" fill="none" stroke="#0A090D" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><Path d="M8 6h8l2 2h2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2l2-2Z" /><Circle cx="12" cy="13" r="4" /></Svg>
+      <Modal visible={showScanInfo} transparent animationType="fade" onRequestClose={() => setShowScanInfo(false)}>
+        <View style={styles.infoBackdrop}>
+          <View style={styles.infoCard}>
+            <Text style={styles.infoTitle}>A thoughtful skin snapshot</Text>
+            <Text style={styles.infoCopy}>Choose a front view or a side profile. The oval is only a positioning guide; SkinSnap does not detect faces. Nothing is analyzed until you preview your photo, give consent, and request an authorized analysis.</Text>
+            <Pressable accessibilityRole="button" onPress={() => setShowScanInfo(false)} style={styles.infoDismiss}><Text style={styles.infoDismissText}>Got it</Text></Pressable>
           </View>
         </View>
-      </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#050609' },
+  screen: { flex: 1, backgroundColor: '#0A0A0A' },
   permissionCard: { alignSelf: 'center', alignItems: 'center', justifyContent: 'center', flex: 1 },
-  permissionEyebrow: { color: '#FF7EA9', fontFamily: 'InterSemibold', letterSpacing: 2, textTransform: 'uppercase' },
+  permissionEyebrow: { color: '#D4B896', fontFamily: 'InterSemibold', letterSpacing: 2, textTransform: 'uppercase' },
   permissionTitle: { color: '#F6F5F8', fontFamily: 'InterExtraBold', textAlign: 'center' },
-  permissionText: { color: '#C8C5D1', fontFamily: 'InterRegular', textAlign: 'center', marginTop: 12 },
-  permissionButton: { width: '100%', marginTop: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FF6E9F' },
-  permissionButtonText: { color: '#0A090D', fontFamily: 'InterExtraBold' },
+  permissionText: { color: '#B9B4B5', fontFamily: 'InterRegular', textAlign: 'center', marginTop: 12 },
+  permissionButton: { width: '100%', marginTop: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E8C9A0' },
+  permissionButtonText: { color: '#181613', fontFamily: 'InterExtraBold' },
   permissionSecondary: { paddingVertical: 8 },
-  permissionSecondaryText: { color: '#E9DCE4', fontFamily: 'InterMedium' },
-  cameraTop: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 3, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  cameraActionsRight: { flexDirection: 'row', gap: 10 },
+  permissionSecondaryText: { color: '#C8C1C0', fontFamily: 'InterMedium' },
   iconButton: { alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(11, 12, 15, 0.45)', borderColor: 'rgba(255,255,255,0.25)', borderWidth: 1, borderRadius: 21 },
-  switchButton: { alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(11, 12, 15, 0.45)', borderColor: 'rgba(255,255,255,0.25)', borderWidth: 1, borderRadius: 21 },
-  cameraCenter: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center', zIndex: 2 },
-  faceGuideShell: { alignItems: 'center', justifyContent: 'center', opacity: 0.95 },
-  faceGuideWrap: { position: 'relative', alignItems: 'center', justifyContent: 'center' },
-  faceGuide: { borderWidth: 2.8, borderColor: '#B6F3B9', borderRadius: 200, backgroundColor: 'transparent' },
-  faceGuideLine: { position: 'absolute', height: 2.2, backgroundColor: '#B6F3B9', borderRadius: 2, alignSelf: 'center' },
-  cameraFooter: { position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 3, alignItems: 'center', paddingBottom: 30 },
-  helperText: { color: '#FFFFFF', fontFamily: 'InterMedium', textAlign: 'center', paddingHorizontal: 24 },
-  cameraControls: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  galleryButton: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#F2EAEF', borderColor: '#E7D6DE', borderWidth: 1 },
-  shutterButton: { alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: 'rgba(255,255,255,0.8)', backgroundColor: 'rgba(255,255,255,0.08)', shadowColor: '#FF5E97', shadowOpacity: 0.65, shadowRadius: 16, shadowOffset: { width: 0, height: 0 } },
-  shutterInner: { backgroundColor: '#FFFFFF', borderWidth: 4, borderColor: '#FF6EA4' },
+  cameraCenter: { position: 'absolute', left: 0, right: 0, alignItems: 'center', justifyContent: 'center', zIndex: 2 },
+  faceGuide: { backgroundColor: 'transparent', borderColor: '#A77BEB', borderStyle: 'dashed' },
+  cameraErrorCard: { alignItems: 'center', gap: 6, backgroundColor: 'rgba(10,10,10,0.82)', borderWidth: 1, borderColor: '#2A2A2C' },
+  cameraErrorTitle: { color: '#FFFFFF', fontFamily: 'InterExtraBold', textAlign: 'center' },
+  cameraErrorText: { color: '#D0D0D0', fontFamily: 'InterRegular', textAlign: 'center' },
+  cameraFooter: { position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 3, alignItems: 'stretch', paddingTop: 9, backgroundColor: 'rgba(10,10,10,0.82)' },
+  helperText: { color: '#FFFFFF', fontFamily: 'InterExtraBold', textAlign: 'center', paddingHorizontal: 12 },
+  scanHeader: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'rgba(10,10,10,0.46)', borderBottomLeftRadius: 22, borderBottomRightRadius: 22 },
+  scanHeaderSide: { alignItems: 'center', justifyContent: 'center' },
+  scanHeaderTitle: { flex: 1, alignItems: 'flex-start', paddingLeft: 8 },
+  scanBrand: { color: '#FFFFFF', fontFamily: 'InterExtraBold' },
+  scanStep: { color: '#A8A3A5', fontFamily: 'InterRegular', marginTop: 1 },
+  infoGlyph: { color: '#AAA5A7', fontSize: 19, fontFamily: 'InterSemibold', borderWidth: 1.5, borderColor: '#777174', width: 22, height: 22, textAlign: 'center', borderRadius: 12, lineHeight: 21 },
+  readinessChips: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
+  captureViews: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
+  captureViewOption: { justifyContent: 'center', alignItems: 'center', borderRadius: 18, borderWidth: 1, borderColor: '#3B3734', backgroundColor: '#171719' },
+  captureViewOptionSelected: { borderColor: '#D4B896', backgroundColor: 'rgba(212,184,150,0.16)' },
+  captureViewText: { color: '#B9B4B5', fontFamily: 'InterMedium' },
+  captureViewTextSelected: { color: '#E8C9A0', fontFamily: 'InterSemibold' },
+  readinessChip: { justifyContent: 'center', borderRadius: 18, backgroundColor: '#1A1A1C', borderWidth: 1, borderColor: '#2A2A2C' },
+  readinessChipSelected: { backgroundColor: '#263126', borderColor: '#6F936D' },
+  readinessChipText: { color: '#B8B8B8', fontFamily: 'InterSemibold' },
+  readinessChipTextSelected: { color: '#A9D3A5' },
+  readinessHint: { color: '#A9A4A6', fontFamily: 'InterMedium' },
+  captureButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#8D58D6' },
+  captureLabel: { color: '#FFFFFF', fontFamily: 'InterSemibold' },
+  captureFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8 },
+  galleryLink: { paddingVertical: 5, paddingRight: 8 },
+  galleryLinkText: { color: '#E8C9A0', fontFamily: 'InterMedium', fontSize: 11 },
+  cameraUtility: { paddingHorizontal: 5, paddingVertical: 5 },
+  utilityText: { color: '#A9A4A6', fontFamily: 'InterRegular', fontSize: 10 },
+  infoBackdrop: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.78)', padding: 24 },
+  infoCard: { width: '100%', maxWidth: 380, borderRadius: 22, padding: 22, backgroundColor: '#1A1A1C', borderWidth: 1, borderColor: '#393437', gap: 14 },
+  infoTitle: { color: '#FFFFFF', fontSize: 20, fontFamily: 'InterSemibold' },
+  infoCopy: { color: '#C7C1C4', fontSize: 14, lineHeight: 21, fontFamily: 'InterRegular' },
+  infoDismiss: { minHeight: 46, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E8C9A0' },
+  infoDismissText: { color: '#181613', fontFamily: 'InterSemibold' },
   previewSafeArea: { flex: 1 },
   previewScroll: { flex: 1 },
   previewScreen: { flexGrow: 1, alignItems: 'center', paddingHorizontal: 20, paddingTop: 12 },
@@ -386,22 +580,22 @@ const styles = StyleSheet.create({
   previewHeader: { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 8 },
   previewBack: { width: 48, height: 48, flexShrink: 0 },
   previewHeadline: { flex: 1, color: '#F7F5F9', fontFamily: 'InterExtraBold', textAlign: 'center', fontSize: 24, lineHeight: 31 },
-  previewCard: { overflow: 'hidden', backgroundColor: '#201E24', borderWidth: 1, borderColor: '#F6CDD8', borderRadius: 24 },
+  previewCard: { overflow: 'hidden', backgroundColor: '#1A1A1C', borderWidth: 1, borderColor: '#3C3835', borderRadius: 24 },
   previewImage: { width: '100%', backgroundColor: '#1A1A1D' },
-  previewTips: { backgroundColor: 'rgba(244, 232, 237, 0.92)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.24)', borderRadius: 18, padding: 16 },
-  tipsTitle: { color: '#090B10', fontFamily: 'InterSemibold', fontSize: 15, lineHeight: 21 },
-  tipsBody: { color: '#2E2A32', fontFamily: 'InterRegular', marginTop: 4, fontSize: 14, lineHeight: 21 },
+  previewTips: { backgroundColor: '#1A1A1C', borderWidth: 1, borderColor: '#2A2A2C', borderRadius: 18, padding: 16 },
+  previewTipsTitle: { color: '#E8C9A0', fontFamily: 'InterSemibold', fontSize: 15, lineHeight: 21 },
+  previewTipsBody: { color: '#C4BDBD', fontFamily: 'InterRegular', marginTop: 4, fontSize: 13, lineHeight: 20 },
   consentRow: { width: '100%', flexDirection: 'row', alignItems: 'flex-start', gap: 12, minHeight: 56, paddingVertical: 8 },
-  checkbox: { width: 28, height: 28, marginTop: 2, flexShrink: 0, borderRadius: 7, borderWidth: 1.5, borderColor: '#D4CED5', alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' },
-  checkboxActive: { backgroundColor: '#FF6D9A', borderColor: '#FF6D9A' },
+  checkbox: { width: 28, height: 28, marginTop: 2, flexShrink: 0, borderRadius: 7, borderWidth: 1.5, borderColor: '#777174', alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' },
+  checkboxActive: { backgroundColor: '#E8C9A0', borderColor: '#E8C9A0' },
   checkmark: { color: '#06070A', fontFamily: 'InterExtraBold', fontSize: 12 },
-  consentText: { color: '#D7D6DE', fontFamily: 'InterRegular', flex: 1, fontSize: 14, lineHeight: 21 },
+  consentText: { color: '#C8C1C0', fontFamily: 'InterRegular', flex: 1, fontSize: 14, lineHeight: 21 },
   privacyLinks: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: -8 },
   consentVersion: { color: '#AAA4AF', fontFamily: 'InterRegular', fontSize: 11 },
-  privacyLink: { color: '#FF8FB2', fontFamily: 'InterSemibold', fontSize: 12, textDecorationLine: 'underline' },
+  privacyLink: { color: '#E8C9A0', fontFamily: 'InterSemibold', fontSize: 12, textDecorationLine: 'underline' },
   previewActions: { width: '100%', alignItems: 'stretch', gap: 10 },
   primaryButton: { position: 'relative', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', minHeight: 56, borderRadius: 28, paddingHorizontal: 16, paddingVertical: 14 },
-  primaryButtonText: { color: '#090B10', fontFamily: 'InterExtraBold', zIndex: 1, fontSize: 16, lineHeight: 23, textAlign: 'center' },
-  secondaryButton: { backgroundColor: 'rgba(18, 18, 21, 0.94)', borderColor: 'rgba(255,255,255,0.15)', borderWidth: 1, alignItems: 'center', justifyContent: 'center', minHeight: 48, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 12 },
-  secondaryButtonText: { color: '#F6F5F8', fontFamily: 'InterSemibold', fontSize: 15, lineHeight: 22, textAlign: 'center' },
+  primaryButtonText: { color: '#181613', fontFamily: 'InterExtraBold', zIndex: 1, fontSize: 16, lineHeight: 23, textAlign: 'center' },
+  secondaryButton: { backgroundColor: '#1A1A1C', borderColor: '#3A3735', borderWidth: 1, alignItems: 'center', justifyContent: 'center', minHeight: 48, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 12 },
+  secondaryButtonText: { color: '#E8C9A0', fontFamily: 'InterSemibold', fontSize: 15, lineHeight: 22, textAlign: 'center' },
 });

@@ -1,11 +1,11 @@
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 export function LaunchSplash() {
   return (
     <View style={styles.container}>
       <LinearGradient
-        colors={['#1B0D18', '#100B13', '#09090E']}
+        colors={['#191713', '#100F0D', '#09090E']}
         locations={[0, 0.48, 1]}
         style={StyleSheet.absoluteFill}
       />
@@ -13,7 +13,9 @@ export function LaunchSplash() {
       <View style={styles.content}>
         <Text style={styles.wordmark}>Skin<Text style={styles.accent}>Snap</Text></Text>
         <Text style={styles.tagline}>Your skincare, your pace.</Text>
-        <ActivityIndicator color="#FF79A6" size="small" style={styles.indicator} />
+        <View style={styles.brandMark}>
+          <LinearGradient colors={['#E8C9A0', '#D4B896']} style={styles.brandMarkFill} />
+        </View>
       </View>
     </View>
   );
@@ -33,7 +35,7 @@ const styles = StyleSheet.create({
     width: 280,
     height: 280,
     borderRadius: 140,
-    backgroundColor: 'rgba(255, 74, 139, 0.09)',
+    backgroundColor: 'rgba(212, 184, 150, 0.08)',
     transform: [{ scaleX: 1.35 }],
   },
   content: {
@@ -46,16 +48,15 @@ const styles = StyleSheet.create({
     letterSpacing: -1.8,
   },
   accent: {
-    color: '#FF6B9D',
+    color: '#E8C9A0',
   },
   tagline: {
     marginTop: 5,
-    color: '#C7B8C3',
+    color: '#B9B4B5',
     fontFamily: 'InterMedium',
     fontSize: 14,
     letterSpacing: 0.2,
   },
-  indicator: {
-    marginTop: 28,
-  },
+  brandMark: { width: 26, height: 3, borderRadius: 2, overflow: 'hidden', marginTop: 22, opacity: 0.9 },
+  brandMarkFill: { width: '100%', height: 3, borderRadius: 2 },
 });

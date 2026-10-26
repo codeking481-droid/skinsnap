@@ -1,23 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  getEntryDestination,
   getOnboardingResumeStep,
   sanitizeRoutineProgress,
   startScanTicker,
 } from '../src/flowLogic.ts';
 import { MAX_PREPARED_PHOTO_BYTES, validatePhoto } from '../src/photoValidation.ts';
 
-test('first-time users start onboarding; returning users enter at upload', () => {
-  assert.equal(getEntryDestination(false), '/');
-  assert.equal(getEntryDestination(true), '/upload');
-});
-
 test('onboarding resumes only at valid saved steps', () => {
   assert.equal(getOnboardingResumeStep(1), 1);
   assert.equal(getOnboardingResumeStep(2), 2);
   assert.equal(getOnboardingResumeStep(3), 3);
-  assert.equal(getOnboardingResumeStep(4), 1);
+  assert.equal(getOnboardingResumeStep(4), 4);
+  assert.equal(getOnboardingResumeStep(5), 1);
   assert.equal(getOnboardingResumeStep('3'), 1);
 });
 

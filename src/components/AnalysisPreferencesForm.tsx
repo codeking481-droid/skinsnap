@@ -33,10 +33,10 @@ export function AnalysisPreferencesForm({ value, onChange, extended = false }: {
   </View>;
 }
 const styles = StyleSheet.create({
-  card: { marginVertical: 12, padding: 14, borderRadius: 16, borderWidth: 1, borderColor: '#49323D', backgroundColor: '#140F15' },
-  toggle: { minHeight: 44, justifyContent: 'center' }, title: { color: '#FFD0DF', fontFamily: 'InterSemibold', fontSize: 13 },
-  hint: { color: '#CFC7D2', fontSize: 11, lineHeight: 17 }, question: { marginTop: 14 },
+  card: { marginVertical: 12, padding: 14, borderRadius: 16, borderWidth: 1, borderColor: '#2A2A2C', backgroundColor: '#1A1A1C' },
+  toggle: { minHeight: 44, justifyContent: 'center' }, title: { color: '#E8C9A0', fontFamily: 'InterSemibold', fontSize: 13 },
+  hint: { color: '#AFA9AA', fontSize: 11, lineHeight: 17 }, question: { marginTop: 14 },
   label: { color: '#FFF', fontSize: 12, marginBottom: 7 }, options: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
-  chip: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: '#49323D' },
-  selected: { backgroundColor: '#5A263D', borderColor: '#FF8EAF' }, text: { color: '#F4EAF1', fontSize: 12 },
+  chip: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: '#3B3735', backgroundColor: '#151516' },
+  selected: { backgroundColor: '#302A21', borderColor: '#D4B896' }, text: { color: '#E4DEDC', fontSize: 12 },
 });

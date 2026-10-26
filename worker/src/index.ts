@@ -1,5 +1,5 @@
 import { retentionRoute } from './retention.ts';
-import { parseAnalysisPreferences, VISION_PROMPT, type AnalysisPreferences } from '../../src/analysisQuality.ts';
+import { ADULT_AGE_ASSERTION_HEADER, COSMETIC_DISCLAIMER, parseAnalysisCaptureView, parseAnalysisPreferences, parseCosmeticInsights, parseCosmeticSkinAge, isAdultAgeAssertion, visionPromptForCaptureView, type AnalysisCaptureView, type AnalysisPreferences, type CosmeticInsight, type CosmeticSkinAgeEstimate } from '../../src/analysisQuality.ts';
 
 interface Env {
   RETENTION_ENABLED?: string;
@@ -27,10 +27,10 @@ type SkinObservation = {
     | 'natural-pores' | 'color-variation' | 'overall-finish';
   observation: string;
   confidence: 'low' | 'moderate' | 'high';
-  title: string;
-  location: string;
-  visibility: 'clearly-visible' | 'possibly-visible';
-  limitation: string;
+  title?: string;
+  location?: string;
+  visibility?: 'clearly-visible' | 'possibly-visible';
+  limitation?: string;
   whyItMatters?: string;
   practicalSuggestion?: string;
 };
@@ -39,7 +39,11 @@ type AnalysisResult = {
   resultId: string;
   createdAt: string;
   imageQuality: 'clear' | 'limited';
+  captureView: AnalysisCaptureView;
   summary: string;
+  cosmeticInsights?: CosmeticInsight[];
+  skinAgeEstimate?: CosmeticSkinAgeEstimate | null;
+  disclaimer: typeof COSMETIC_DISCLAIMER;
   observations: SkinObservation[];
   morningRoutine: string[];
   eveningRoutine: string[];
@@ -66,6 +70,8 @@ const UNLIMITED_ADMIN_TEST_LIMIT = 2_147_483_647;
 const GROQ_VISION_MODEL = 'qwen/qwen3.8-27b';
 const MAX_VISION_ATTEMPTS = 2;
 const MAX_VISION_RATE_LIMIT_WAIT_MS = 10_000;
+const VISION_RESPONSE_BODY_TIMEOUT_MS = 5_000;
+const ROUTINE_RESPONSE_BODY_TIMEOUT_MS = 5_000;
 const ENTITLEMENT_ID = 'skinsnap_premium';
 const OBSERVATION_CATEGORIES = new Set([
   'visible-shine',
@@ -142,6 +148,19 @@ function json(body: unknown, status = 200, headers?: HeadersInit): Response {
   responseHeaders.set('Cache-Control', 'no-store');
   responseHeaders.set('X-Content-Type-Options', 'nosniff');
   return new Response(JSON.stringify(body), { status, headers: responseHeaders });
+}
+
+function withinDeadline<T>(operation: Promise<T>, timeoutMs: number, onTimeout: () => void): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      onTimeout();
+      reject(new Error('provider-timeout'));
+    }, timeoutMs);
+    operation.then(
+      value => { clearTimeout(timer); resolve(value); },
+      error => { clearTimeout(timer); reject(error); },
+    );
+  });
 }
 
 function required(value: string | undefined, name: string): string {
@@ -283,75 +302,137 @@ function base64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-type SkinObservations = Pick<AnalysisResult, 'imageQuality' | 'summary' | 'observations'> & {
-  analysisUsable: boolean;
-};
+type SkinObservations = Pick<AnalysisResult, 'imageQuality' | 'summary' | 'observations' | 'cosmeticInsights' | 'skinAgeEstimate'>;
 type RoutineGuidance = Pick<AnalysisResult, 'morningRoutine' | 'eveningRoutine' | 'precautions'>;
 
-function parseModelResult(text: string): SkinObservations {
+function invalidVisionResponse(requestId: string, reason: string, message: string): ApiError {
+  logAnalysisProgress(requestId, 'vision-response-rejected', { reason });
+  return new ApiError(502, 'vision-invalid-response', message);
+}
+
+function parseModelResult(text: string, captureView: AnalysisCaptureView, requestId: string): SkinObservations {
   let value: unknown;
+  const normalizedText = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   try {
-    value = JSON.parse(text);
+    value = JSON.parse(normalizedText);
   } catch {
-    throw new ApiError(502, 'vision-invalid-response', 'The vision provider returned an unreadable response.');
+    throw invalidVisionResponse(requestId, 'invalid-json', 'The vision provider returned an unreadable response.');
   }
   if (!isRecord(value)
-    || typeof value.analysisUsable !== 'boolean'
-    || typeof value.summary !== 'string'
-    || value.summary.trim().length === 0
-    || !isSafeCosmeticText(value.summary)
-    || value.summary.length > 800
     || !['clear', 'limited'].includes(String(value.imageQuality))
-    || !Array.isArray(value.observations)
-    || value.observations.length > 7
-    || (value.analysisUsable === false && (value.imageQuality !== 'limited' || value.observations.length !== 0))) {
-    throw new ApiError(502, 'vision-invalid-response', 'The vision provider returned an unsupported response.');
+    || !Array.isArray(value.observations)) {
+    throw invalidVisionResponse(requestId, 'invalid-required-fields', 'The vision provider returned an unsupported response.');
   }
-  const observations: SkinObservation[] = value.observations.map((item) => {
-    if (!isRecord(item)
+  if (value.observations.length > 7) {
+    logAnalysisProgress(requestId, 'extra-observations-discarded', { count: value.observations.length - 7 });
+  }
+  const observations: SkinObservation[] = [];
+  for (const item of value.observations.slice(0, 7)) {
+    const isinstanceItem = isRecord(item);
+    const candidateDescription = isinstanceItem
+      ? typeof item.description === 'string' && item.description.trim()
+        ? item.description
+        : typeof item.observation === 'string' && item.observation.trim()
+          ? item.observation
+          : undefined
+      : undefined;
+    const description = typeof candidateDescription === 'string' ? candidateDescription.trim() : undefined;
+    const confidence = isinstanceItem && item.confidence === 'moderate' ? 'medium' : isinstanceItem ? item.confidence : undefined;
+    if (!isinstanceItem
       || typeof item.category !== 'string'
       || !OBSERVATION_CATEGORIES.has(item.category)
-      || typeof item.observation !== 'string'
-      || !item.observation.trim()
-      || !isSafeCosmeticText(item.observation)
-      || item.observation.length > 400
-      || !['low', 'moderate', 'high'].includes(String(item.confidence))
-      || typeof item.title !== 'string' || !item.title.trim() || item.title.length > 70 || !isSafeCosmeticText(item.title)
-      || typeof item.location !== 'string' || !item.location.trim() || item.location.length > 100 || !isSafeCosmeticText(item.location)
-      || !['clearly-visible', 'possibly-visible'].includes(String(item.visibility))
-      || typeof item.limitation !== 'string' || !item.limitation.trim() || item.limitation.length > 240 || !isSafeCosmeticText(item.limitation)
-      || (item.whyItMatters !== undefined && (typeof item.whyItMatters !== 'string' || !item.whyItMatters.trim() || item.whyItMatters.length > 240 || !isSafeCosmeticText(item.whyItMatters)))
-      || (item.practicalSuggestion !== undefined && (typeof item.practicalSuggestion !== 'string' || !item.practicalSuggestion.trim() || item.practicalSuggestion.length > 240 || !isSafeCosmeticText(item.practicalSuggestion)))) {
-      throw new ApiError(502, 'vision-invalid-response', 'The vision provider returned an unsupported observation.');
+      || typeof description !== 'string'
+      || !description
+      || !isSafeCosmeticText(description)
+      || description.length > 400
+      || !['low', 'medium', 'high'].includes(String(confidence))) {
+      logAnalysisProgress(requestId, 'unsupported-observation-discarded', { reason: !isinstanceItem ? 'not-object' : 'invalid-fields' });
+      continue;
     }
-    return {
+    const evidence: Pick<SkinObservation, 'title' | 'location' | 'visibility' | 'limitation' | 'whyItMatters' | 'practicalSuggestion'> = {};
+    for (const [key, maxLength] of [
+      ['title', 70],
+      ['location', 100],
+      ['limitation', 240],
+      ['whyItMatters', 240],
+      ['practicalSuggestion', 240],
+    ] as const) {
+      const value = isinstanceItem && typeof item[key] === 'string' ? item[key] : undefined;
+      if (typeof value === 'string' && value.trim() && value.length <= maxLength && isSafeCosmeticText(value)) {
+        evidence[key] = value.trim();
+      }
+    }
+    if (isinstanceItem && item.visibility === 'clearly-visible') {
+      evidence.visibility = 'clearly-visible';
+    } else if (isinstanceItem && item.visibility === 'possibly-visible') {
+      evidence.visibility = 'possibly-visible';
+    }
+    observations.push({
+      ...evidence,
       category: item.category as SkinObservation['category'],
-      observation: item.observation,
-      confidence: item.confidence as SkinObservation['confidence'],
-      title: item.title,
-      location: item.location,
-      visibility: item.visibility as SkinObservation['visibility'],
-      limitation: item.limitation,
-      ...(item.whyItMatters !== undefined ? { whyItMatters: item.whyItMatters } : {}),
-      ...(item.practicalSuggestion !== undefined ? { practicalSuggestion: item.practicalSuggestion } : {}),
-    };
-  });
+      observation: description,
+      confidence: confidence === 'medium' ? 'moderate' : confidence as SkinObservation['confidence'],
+    });
+  }
+  if (value.observations.length > 0 && observations.length === 0) {
+    throw invalidVisionResponse(requestId, 'no-safe-observations', 'The vision provider returned no safe observations.');
+  }
+  let cosmeticInsights: CosmeticInsight[] = [];
+  const hasInsightOutput = Object.hasOwn(value, 'cosmeticInsights');
+  try {
+    if (value.cosmeticInsights !== undefined && !Array.isArray(value.cosmeticInsights)) {
+      throw new Error('invalid-optional-insights');
+    }
+    cosmeticInsights = parseCosmeticInsights(value.cosmeticInsights, observations, value.imageQuality as SkinObservations['imageQuality']);
+  } catch {
+    if (hasInsightOutput) logAnalysisProgress(requestId, 'unsupported-insights-discarded', { reason: 'invalid-or-unmatched-evidence' });
+  }
+  let skinAgeEstimate: CosmeticSkinAgeEstimate | null | undefined;
+  try {
+    skinAgeEstimate = parseCosmeticSkinAge(
+      value.skinAgeEstimate,
+      value.imageQuality as SkinObservations['imageQuality'],
+      captureView,
+    );
+  } catch {
+    logAnalysisProgress(requestId, 'unsupported-age-estimate-discarded', { reason: 'outside-supported-format' });
+  }
+  const summary = typeof value.summary === 'string' && value.summary.trim()
+    && value.summary.length <= 800 && isSafeCosmeticText(value.summary)
+    ? value.summary
+    : undefined;
+  if (Object.hasOwn(value, 'summary') && summary === undefined) {
+    logAnalysisProgress(requestId, 'unsupported-summary-discarded', { reason: 'unsafe-or-invalid-text' });
+  }
   return {
-    analysisUsable: value.analysisUsable,
     imageQuality: value.imageQuality as SkinObservations['imageQuality'],
-    summary: value.summary,
+    summary: summary
+      ?? observations.find(item => item.category === 'overall-finish')?.observation
+      ?? observations[0]?.observation
+      ?? 'This is a cosmetic review of visible skin features only.',
+    cosmeticInsights,
+    skinAgeEstimate: skinAgeEstimate ?? null,
     observations,
   };
 }
 
-async function analyzeWithGroqVision(env: Env, file: File, requestId: string): Promise<SkinObservations> {
+async function analyzeWithGroqVisionAttempt(
+  env: Env,
+  file: File,
+  requestId: string,
+  captureView: AnalysisCaptureView,
+  retryResponse = false,
+): Promise<SkinObservations> {
   const apiKey = required(env.GROQ_API_KEY, 'Groq');
   const content = new Uint8Array(await file.arrayBuffer());
   let response: Response | null = null;
+  let lastAttempt = 0;
   for (let attempt = 1; attempt <= MAX_VISION_ATTEMPTS; attempt += 1) {
+    lastAttempt = attempt;
     logAnalysisProgress(requestId, 'vision-started', { provider: 'groq', model: GROQ_VISION_MODEL, attempt });
+    const controller = new AbortController();
     try {
-      response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      response = await withinDeadline(fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({
@@ -364,7 +445,9 @@ async function analyzeWithGroqVision(env: Env, file: File, requestId: string): P
             content: [
               {
                 type: 'text',
-                text: VISION_PROMPT,
+                text: retryResponse
+                  ? `${visionPromptForCaptureView(captureView)}\nYour previous response did not match the required format. Return exactly one valid JSON object with imageQuality and observations. Use only supported observation categories and the fields category, description, and confidence. If no safe observation is supported, return an empty observations array.`
+                  : visionPromptForCaptureView(captureView),
               },
               {
                 type: 'image_url',
@@ -374,10 +457,12 @@ async function analyzeWithGroqVision(env: Env, file: File, requestId: string): P
           }],
           response_format: { type: 'json_object' },
         }),
-        signal: AbortSignal.timeout(35_000),
-      });
+        signal: controller.signal,
+      }), 35_000, () => controller.abort());
     } catch (error) {
-      const timedOut = error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
+      const timedOut = error instanceof Error && (
+        error.message === 'provider-timeout' || error.name === 'AbortError' || error.name === 'TimeoutError'
+      );
       logVisionFailure({
         requestId,
         httpStatus: null,
@@ -413,15 +498,61 @@ async function analyzeWithGroqVision(env: Env, file: File, requestId: string): P
   if (!response?.ok) {
     throw new ApiError(503, 'vision-provider-unavailable', 'SkinSnap could not complete your analysis right now. Please try again shortly.');
   }
-  const payload = await readJson(response);
+  let payload: unknown;
+  try {
+    payload = await withinDeadline(readJson(response), VISION_RESPONSE_BODY_TIMEOUT_MS, () => {});
+  } catch (error) {
+    const timedOut = error instanceof Error && error.message === 'provider-timeout';
+    logVisionFailure({
+      requestId,
+      httpStatus: response.status,
+      category: timedOut ? 'timeout' : 'invalid-response',
+      timedOut,
+      attempt: lastAttempt,
+    });
+    if (error instanceof ApiError && error.code === 'upstream-invalid-response') {
+      throw new ApiError(502, 'vision-invalid-response', 'The vision provider returned an unreadable response.');
+    }
+    if (timedOut) {
+      throw new ApiError(503, 'vision-provider-unavailable', 'The vision provider response timed out. Please try again shortly.');
+    }
+    throw error;
+  }
   const choices = isRecord(payload) && Array.isArray(payload.choices) ? payload.choices : [];
   const message = isRecord(choices[0]) && isRecord(choices[0].message) ? choices[0].message : null;
   if (!message || typeof message.content !== 'string') {
-    throw new ApiError(502, 'vision-invalid-response', 'The vision provider returned no usable observations.');
+    throw invalidVisionResponse(requestId, 'missing-message-content', 'The vision provider returned no usable observations.');
   }
-  const observations = parseModelResult(message.content);
+  let observations: SkinObservations;
+  try {
+    observations = parseModelResult(message.content, captureView, requestId);
+  } catch (error) {
+    logVisionFailure({
+      requestId,
+      httpStatus: response.status,
+      category: error instanceof ApiError ? error.code : 'invalid-response',
+      timedOut: false,
+      attempt: lastAttempt,
+    });
+    throw error;
+  }
   logAnalysisProgress(requestId, 'vision-completed', { provider: 'groq', model: GROQ_VISION_MODEL });
   return observations;
+}
+
+async function analyzeWithGroqVision(
+  env: Env,
+  file: File,
+  requestId: string,
+  captureView: AnalysisCaptureView,
+): Promise<SkinObservations> {
+  try {
+    return await analyzeWithGroqVisionAttempt(env, file, requestId, captureView);
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.code !== 'vision-invalid-response') throw error;
+    logAnalysisProgress(requestId, 'vision-format-retry');
+    return analyzeWithGroqVisionAttempt(env, file, requestId, captureView, true);
+  }
 }
 
 function parseRoutineResult(text: string): RoutineGuidance {
@@ -460,8 +591,9 @@ async function generateRoutineWithGroq(
   const apiKey = required(env.GROQ_API_KEY, 'Groq');
   logAnalysisProgress(requestId, 'groq-started');
   let response: Response;
+  const controller = new AbortController();
   try {
-    response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    response = await withinDeadline(fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -490,13 +622,21 @@ async function generateRoutineWithGroq(
           },
         },
       }),
-      signal: AbortSignal.timeout(25_000),
-    });
+      signal: controller.signal,
+    }), 25_000, () => controller.abort());
   } catch {
     throw new ApiError(503, 'routine-provider-unavailable', 'The routine service could not be reached. Please retry.');
   }
   if (!response.ok) throw new ApiError(503, 'routine-provider-unavailable', 'The routine service is temporarily unavailable. Please retry.');
-  const payload = await readJson(response);
+  let payload: unknown;
+  try {
+    payload = await withinDeadline(readJson(response), ROUTINE_RESPONSE_BODY_TIMEOUT_MS, () => {});
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'upstream-invalid-response') {
+      throw new ApiError(502, 'routine-invalid-response', 'The routine service returned an unreadable response.');
+    }
+    throw new ApiError(503, 'routine-provider-unavailable', 'The routine service could not complete its response. Please retry.');
+  }
   const choices = isRecord(payload) && Array.isArray(payload.choices) ? payload.choices : [];
   const message = isRecord(choices[0]) && isRecord(choices[0].message) ? choices[0].message : null;
   if (!message || typeof message.content !== 'string') {
@@ -581,6 +721,9 @@ async function handleAnalysis(
       throw new ApiError(403, 'development-test-not-authorized', 'This development analysis is limited to its authorized test account.');
     }
   }
+  if (!isAdultAgeAssertion(request.headers.get(ADULT_AGE_ASSERTION_HEADER))) {
+    throw new ApiError(403, 'adult-eligibility-required', 'SkinSnap analysis is available only after confirming that you are 18 or older.');
+  }
   const idempotencyKey = request.headers.get('Idempotency-Key')?.trim();
   if (!idempotencyKey || idempotencyKey.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(idempotencyKey)) {
     throw new ApiError(400, 'invalid-idempotency-key', 'A valid Idempotency-Key is required.');
@@ -598,6 +741,8 @@ async function handleAnalysis(
     if (raw.length > 8192) throw new Error('invalid-preferences');
     preferences = parseAnalysisPreferences(JSON.parse(raw.startsWith('%') ? decodeURIComponent(raw) : raw));
   } catch { throw new ApiError(400, 'invalid-preferences', 'Choose one of the available routine preferences.'); }
+  const captureView = parseAnalysisCaptureView(request.headers.get('X-SkinSnap-Capture-View') ?? 'front');
+  if (!captureView) throw new ApiError(400, 'invalid-capture-view', 'Choose a front view or side profile.');
   const form = await request.formData();
   const file = form.get('photo');
   if (!(file instanceof File) || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
@@ -631,13 +776,12 @@ async function handleAnalysis(
   }
   logAnalysisProgress(requestId, 'quota-reserved');
   try {
-    const visionResult = await analyzeWithGroqVision(env, file, requestId);
-    if (!visionResult.analysisUsable) {
-      throw new ApiError(422, 'photo-not-suitable', visionResult.summary);
-    }
-    const observations: Pick<AnalysisResult, 'imageQuality' | 'summary' | 'observations'> = {
+    const visionResult = await analyzeWithGroqVision(env, file, requestId, captureView);
+    const observations: Pick<AnalysisResult, 'imageQuality' | 'summary' | 'observations' | 'cosmeticInsights' | 'skinAgeEstimate'> = {
       imageQuality: visionResult.imageQuality,
       summary: visionResult.summary,
+      cosmeticInsights: visionResult.cosmeticInsights,
+      ...(visionResult.skinAgeEstimate !== undefined ? { skinAgeEstimate: visionResult.skinAgeEstimate } : {}),
       observations: visionResult.observations,
     };
     const routine = await generateRoutineWithGroq(env, observations, requestId, preferences);
@@ -646,11 +790,16 @@ async function handleAnalysis(
       ...routine,
       resultId: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
+      captureView,
+      disclaimer: COSMETIC_DISCLAIMER,
     };
     await updateAnalysis(env, user.id, idempotencyKey, result);
     logAnalysisProgress(requestId, 'result-saved');
     return json(result, 201);
   } catch (error) {
+    logAnalysisProgress(requestId, 'analysis-failed', {
+      code: error instanceof ApiError && /^[a-z0-9-]{1,64}$/.test(error.code) ? error.code : 'unexpected-error',
+    });
     try {
       await markAnalysisFailed(env, user.id, idempotencyKey);
     } catch (failureError) {
@@ -845,7 +994,7 @@ function applyCors(request: Request, env: Env, response: Response): Response {
   const headers = new Headers(response.headers);
   headers.set('Access-Control-Allow-Origin', origin);
   headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  headers.set('Access-Control-Allow-Headers', 'Authorization, apikey, Content-Type, Idempotency-Key, X-SkinSnap-Preferences');
+  headers.set('Access-Control-Allow-Headers', `Authorization, apikey, Content-Type, Idempotency-Key, X-SkinSnap-Preferences, X-SkinSnap-Capture-View, ${ADULT_AGE_ASSERTION_HEADER}`);
   headers.set('Access-Control-Expose-Headers', 'Retry-After');
   headers.set('Access-Control-Max-Age', '86400');
   headers.append('Vary', 'Origin');
@@ -864,7 +1013,7 @@ async function route(request: Request, env: Env): Promise<Response> {
       status: 204,
       headers: {
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers': 'Authorization, apikey, Content-Type, Idempotency-Key',
+        'Access-Control-Allow-Headers': `Authorization, apikey, Content-Type, Idempotency-Key, X-SkinSnap-Preferences, X-SkinSnap-Capture-View, ${ADULT_AGE_ASSERTION_HEADER}`,
         'Access-Control-Max-Age': '86400',
         ...(origin ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {}),
       },

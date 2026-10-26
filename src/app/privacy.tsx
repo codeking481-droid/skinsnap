@@ -29,14 +29,14 @@ export default function PrivacyScreen() {
 
   return (
     <View style={styles.screen}>
-      <LinearGradient colors={['#10080E', '#08070C', '#050509']} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={['#171512', '#0A0A0A', '#050509']} style={StyleSheet.absoluteFill} />
       <ScrollView contentContainerStyle={[styles.scroll, { minHeight: height }]}>
         <View style={[styles.page, { width: pageWidth, paddingTop: Math.max(insets.top, 16), paddingBottom: Math.max(insets.bottom, 24) }]}>
           <Pressable accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} style={styles.back}>
             <Text style={styles.backText}>‹</Text>
           </Pressable>
-          <Text style={styles.brand}>Skin<Text style={styles.pink}>Snap</Text></Text>
-          <Text accessibilityRole="header" style={styles.title}>Privacy <Text style={styles.pink}>information</Text></Text>
+          <Text style={styles.brand}>Skin<Text style={styles.accent}>Snap</Text></Text>
+          <Text accessibilityRole="header" style={styles.title}>Privacy <Text style={styles.accent}>information</Text></Text>
           <Text style={styles.lead}>A plain-language summary of how the current app handles your photo and account data.</Text>
 
           <Section title="Photo processing">
@@ -45,7 +45,7 @@ export default function PrivacyScreen() {
           </Section>
 
           <Section title="AI providers and results">
-            <Text style={styles.copy}>Groq receives the image for visual observations, then text observations and any optional routine preferences to generate general morning and evening skincare guidance. Optional answers stay in the session unless you explicitly save My Skin Preferences. Saved preferences, custom routines and diary check-ins are private account records when the retention server update is enabled. Diary notes and routine edits are not sent to Groq. Relevant saved preferences are sent only with a consented analysis. Lighting, camera quality, and filters can affect observations. Results are cosmetic information only, not a diagnosis or medical advice.</Text>
+            <Text style={styles.copy}>Groq receives the image for visual observations, then text observations and any optional routine preferences to generate general morning and evening skincare guidance. Optional answers stay in the session unless you explicitly save My Skin Preferences. Saved preferences, custom routines and diary check-ins are private account records when the retention server update is enabled. Diary notes and routine edits are not sent to Groq. Relevant saved preferences are sent only with a consented analysis. Lighting, camera quality, and filters can affect observations. Results are for cosmetic tracking only, not medical diagnosis.</Text>
             <Text style={styles.copy}>SkinSnap saves structured analysis results for account history and routine screens. Failed jobs may leave a status and attempt record, but do not store the uploaded image in the app database. Provider-side logs, review, and retention are controlled by each provider’s terms and account settings; SkinSnap cannot delete provider-held copies through this app.</Text>
           </Section>
 
@@ -57,7 +57,7 @@ export default function PrivacyScreen() {
 
           <Section title="Your choices and support">
             <Text style={styles.copy}>You may decline photo consent, choose another photo, or leave without requesting analysis. To withdraw consent before upload, untick the consent box or leave the photo screen. Consent is held only in app memory for the selected photo and is requested again for a new photo or app session.</Text>
-            <Text style={styles.copy}>SkinSnap is for people aged {MINIMUM_USER_AGE} and older. The app asks for an age confirmation and does not ask for your date of birth. A public operator contact and external deletion-request service still need to be configured before release.</Text>
+            <Text style={styles.copy}>SkinSnap is an 18+ cosmetic tracking app for launch. It asks users to confirm they are at least {MINIMUM_USER_AGE}; it does not ask for a date of birth or offer a parental-consent route. Someone who selects under 18 is blocked from onboarding. The exact result disclaimer is “Cosmetic tracking only, not medical diagnosis.” A public operator contact and external deletion-request service still need to be configured before release.</Text>
           </Section>
 
           {PUBLISHED_PRIVACY_POLICY_URL && <Pressable accessibilityRole="link" disabled={busy} onPress={() => void openPolicy()} style={styles.linkButton}>
@@ -92,13 +92,13 @@ const styles = StyleSheet.create({
   backText: { color: '#FFF', fontSize: 36, lineHeight: 40 },
   brand: { color: '#FFF', fontSize: 19, fontFamily: 'InterExtraBold', textAlign: 'center' },
   title: { color: '#FFF', fontSize: 27, lineHeight: 34, fontFamily: 'InterExtraBold', textAlign: 'center' },
-  pink: { color: '#FF6798' },
+  accent: { color: '#E8C9A0' },
   lead: { color: '#D0CAD4', fontSize: 14, lineHeight: 21, fontFamily: 'InterRegular', textAlign: 'center', marginBottom: 3 },
-  section: { gap: 8, backgroundColor: 'rgba(20,14,20,0.92)', borderColor: '#473340', borderWidth: 1, borderRadius: 17, padding: 15 },
-  sectionTitle: { color: '#FF8FB2', fontSize: 15, fontFamily: 'InterSemibold' },
+  section: { gap: 8, backgroundColor: '#1A1A1C', borderColor: '#2A2A2C', borderWidth: 1, borderRadius: 17, padding: 15 },
+  sectionTitle: { color: '#E8C9A0', fontSize: 15, fontFamily: 'InterSemibold' },
   copy: { color: '#D8D1DA', fontSize: 13, lineHeight: 19, fontFamily: 'InterRegular' },
   linkButton: { minHeight: 46, justifyContent: 'center', alignItems: 'center' },
-  linkText: { color: '#FF8FB2', fontSize: 14, fontFamily: 'InterSemibold', textDecorationLine: 'underline' },
-  secondaryButton: { minHeight: 48, justifyContent: 'center', alignItems: 'center', borderRadius: 24, backgroundColor: 'rgba(38,19,31,0.75)', borderColor: '#694257', borderWidth: 1 },
-  secondaryText: { color: '#F5DDE7', fontSize: 13, fontFamily: 'InterSemibold' },
+  linkText: { color: '#E8C9A0', fontSize: 14, fontFamily: 'InterSemibold', textDecorationLine: 'underline' },
+  secondaryButton: { minHeight: 48, justifyContent: 'center', alignItems: 'center', borderRadius: 24, backgroundColor: '#1A1A1C', borderColor: '#534738', borderWidth: 1 },
+  secondaryText: { color: '#E8C9A0', fontSize: 13, fontFamily: 'InterSemibold' },
 });
