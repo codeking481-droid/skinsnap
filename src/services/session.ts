@@ -3,6 +3,7 @@ import { deleteSessionValue, getSessionValue, setSessionValue } from './sessionS
 import { getRevenueCatAppUserId, isRevenueCatConfiguredForPlatform, logInRevenueCatUser, logOutRevenueCatUser } from './billing';
 import {
   AnonymousAuthError,
+  getOrCreateLocalGuestUser,
   requestAnonymousAuthSession,
   verifyAnonymousBackendIdentity,
 } from '../anonymousAuth';
@@ -93,7 +94,7 @@ export function sessionFailureMessage(session: Extract<SessionCheck, { valid: fa
     case 'identity-mismatch':
       return 'Your secure account and subscription identity do not match. No analysis was started; contact support or restore the correct account.';
     case 'configuration':
-      return 'Secure guest access is not configured in this build.';
+      return 'Guest access is temporarily unavailable. You can continue using local SkinSnap features.';
     case 'invalid-response':
       return 'The secure account service returned an invalid identity.';
     case 'missing':
@@ -171,7 +172,16 @@ export async function ensureAuthenticatedSession(): Promise<SessionCheck> {
         process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
       );
     } catch (error) {
-      if (error instanceof AnonymousAuthError) return { valid: false, reason: error.reason };
+      if (error instanceof AnonymousAuthError) {
+        if (error.reason === 'configuration') {
+          console.warn('[SkinSnap] Supabase guest auth is unavailable; using a local guest identity.');
+        }
+        const guest = await getOrCreateLocalGuestUser();
+        if (error.reason === 'configuration' || error.reason === 'anonymous-auth-disabled' || error.reason === 'backend-unavailable') {
+          return { valid: true, userId: guest.id, revenueCatAppUserId: guest.id, isAnonymous: true };
+        }
+        return { valid: false, reason: error.reason };
+      }
       return { valid: false, reason: 'backend-unavailable' };
     }
 

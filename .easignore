@@ -1,0 +1,17 @@
+node_modules.sdk57-backup-20261022/
+node_modules/
+.expo/
+.expo-*/
+dist/
+web-build/
+coverage/
+artifacts/
+.wrangler/
+android/
+*.log
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example

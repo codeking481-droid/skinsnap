@@ -6,9 +6,7 @@ import {
   DOWNSELL_OFFERING_ID,
   hasVerifiedActiveEntitlement,
   isProductWithoutIntro,
-  productMatches,
   PREMIUM_ENTITLEMENT_ID,
-  SUBSCRIPTION_PRODUCTS,
   type SubscriptionPlan,
 } from '../subscriptionRules';
 
@@ -42,7 +40,8 @@ function isExpoGo(): boolean {
 function getApiKey(): string | null {
   const key = Platform.OS === 'ios'
     ? process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY
-    : process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY;
+    : process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY
+      ?? process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY;
   return key?.trim() || null;
 }
 
@@ -56,7 +55,7 @@ async function getConfiguredSdk(): Promise<PurchasesSdk> {
     throw new Error('Billing is only available in the Android and iOS apps.');
   }
   const apiKey = getApiKey();
-  if (!apiKey) throw new Error('RevenueCat is not configured for this build.');
+  if (!apiKey) throw new Error('Store billing is temporarily unavailable.');
 
   if (!configurePromise) {
     configurePromise = (async () => {
@@ -82,16 +81,18 @@ async function getConfiguredSdk(): Promise<PurchasesSdk> {
 }
 
 function packageFor(
-  packages: PurchasesPackage[],
-  plan: SubscriptionPlan,
+  product: PurchasesPackage | null | undefined,
+  period: 'weekly' | 'monthly' | 'yearly',
 ): PurchasesPackage | undefined {
-  const period = plan === 'weekly' ? 'weekly' : plan === 'monthly' ? 'monthly' : 'yearly';
-  return packages.find((item) => productMatches(item.product.identifier, SUBSCRIPTION_PRODUCTS[plan])
-    && isProductWithoutIntro(item.product, period)
-    && Number.isFinite(item.product.price)
-    && item.product.price > 0
-    && Boolean(item.product.currencyCode.trim())
-    && Boolean(item.product.priceString.trim()));
+  // Only base plans are eligible; the store must charge immediately.
+  return product
+    && isProductWithoutIntro(product.product, period)
+    && Number.isFinite(product.product.price)
+    && product.product.price > 0
+    && Boolean(product.product.currencyCode.trim())
+    && Boolean(product.product.priceString.trim())
+    ? product
+    : undefined;
 }
 
 export async function loadBillingState(includeDownsell = false): Promise<BillingState> {
@@ -109,17 +110,17 @@ export async function loadBillingState(includeDownsell = false): Promise<Billing
     if (!current) return { kind: 'error', message: 'Subscription products are unavailable from the store right now.' };
 
     const packages: Partial<Record<SubscriptionPlan, PurchasesPackage>> = {};
-    const weekly = packageFor(current.availablePackages, 'weekly');
-    const monthly = packageFor(current.availablePackages, 'monthly');
-    const yearly = packageFor(current.availablePackages, 'yearly');
+    const weekly = packageFor(current.weekly, 'weekly');
+    const monthly = packageFor(current.monthly, 'monthly');
+    const yearly = packageFor(current.annual, 'yearly');
     if (weekly) packages.weekly = weekly;
     if (monthly) packages.monthly = monthly;
     if (yearly) packages.yearly = yearly;
 
     if (includeDownsell) {
       const exclusiveOffering = offerings.all[DOWNSELL_OFFERING_ID];
-      const downsell = exclusiveOffering
-        ? packageFor(exclusiveOffering.availablePackages, 'yearlyDownsell')
+      const downsell = exclusiveOffering?.annual
+        ? packageFor(exclusiveOffering.annual, 'yearly')
         : undefined;
       if (downsell) packages.yearlyDownsell = downsell;
     }

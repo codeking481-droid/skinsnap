@@ -11,17 +11,7 @@ import { loadAnalysisHistory, type AnalysisHistoryItem } from '../services/authA
 import { loadCustomRoutine, loadDiary } from '../services/retentionApi';
 import { scheduledSteps, type CustomRoutine, type DiaryEntry } from '../retention';
 import { buildRoutineSteps, restoreRoutineGuidance, routineStepIds } from '../routinePresentation';
-
-const STARTER_MORNING = [
-  'Gentle Cream Cleanser. Step 1 · Cleanse gently.',
-  'Moisturizer that suits your skin. Step 2 · Follow the product label.',
-  'Broad-spectrum Sunscreen. Step 3 · Follow the product label.',
-];
-const STARTER_EVENING = [
-  'Gentle Cleanser. Step 1 · Remove daily buildup.',
-  'Moisturizer that suits your skin. Step 2 · Follow the product label.',
-  'A comfortable final step. Step 3 · Keep it simple.',
-];
+import { responsiveScale } from '../responsive';
 
 type HomeData = {
   progress: RoutineProgress;
@@ -36,17 +26,17 @@ type HomeData = {
   notice: string | null;
 };
 
-function createStarterHomeData(notice: string | null = null): HomeData {
+function createEmptyHomeData(notice: string | null = null): HomeData {
   return {
     progress: { checkedSteps: [], completedDays: [] },
     checkedCount: 0,
-    totalCount: 6,
-    morningCount: STARTER_MORNING.length,
-    eveningCount: STARTER_EVENING.length,
+    totalCount: 0,
+    morningCount: 0,
+    eveningCount: 0,
     streak: 0,
     diary: [],
     latest: null,
-    routineLabel: 'GENERAL STARTER · NOT PERSONALIZED',
+    routineLabel: 'NO ROUTINE YET',
     notice,
   };
 }
@@ -90,13 +80,13 @@ function dateLabel(value: string): string {
 export default function HomeScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const [data, setData] = useState<HomeData>(createStarterHomeData());
+  const [data, setData] = useState<HomeData>(createEmptyHomeData());
   const [refreshKey, setRefreshKey] = useState(0);
-  const scale = Math.max(0.9, Math.min(Math.min(width, 520) / 393, 1.08));
+  const scale = responsiveScale(width);
 
   useFocusEffect(useCallback(() => {
     let active = true;
-    setData(createStarterHomeData(refreshKey ? 'Refreshing saved history…' : null));
+    setData(createEmptyHomeData(refreshKey ? 'Refreshing saved history…' : null));
     void (async () => {
       const issues: string[] = [];
       let owner: string | null = null;
@@ -119,14 +109,14 @@ export default function HomeScreen() {
         else issues.push(results[2].reason instanceof Error ? results[2].reason.message : 'Your private diary could not be loaded.');
       }
 
-      const weekday = new Date().getDay();
+      const weekday = (new Date().getDay() + 6) % 7;
       const customToday = custom ? scheduledSteps(custom, weekday) : [];
-      let morningGuidance = STARTER_MORNING;
-      let eveningGuidance = STARTER_EVENING;
+      let morningGuidance: string[] = [];
+      let eveningGuidance: string[] = [];
       let morningIds: string[];
       let eveningIds: string[];
       let routineId: string | undefined;
-      let routineLabel = 'GENERAL STARTER · NOT PERSONALIZED';
+      let routineLabel = 'NO ROUTINE YET';
       if (custom) {
         const morning = customToday.filter(step => step.period === 'Morning');
         const evening = customToday.filter(step => step.period === 'Evening');
@@ -145,8 +135,8 @@ export default function HomeScreen() {
         routineId = latest.resultId;
         routineLabel = restored.usesGeneralGuidance ? 'SAVED GUIDANCE · SOME GENERAL STEPS' : 'YOUR SAVED GUIDANCE';
       } else {
-        morningIds = buildRoutineSteps(morningGuidance, 'Morning').map(step => step.id);
-        eveningIds = buildRoutineSteps(eveningGuidance, 'Evening').map(step => step.id);
+        morningIds = [];
+        eveningIds = [];
       }
       const progress = await loadRoutineProgress(owner ?? undefined, routineId);
       if (!active) return;
@@ -162,12 +152,12 @@ export default function HomeScreen() {
         latest,
         routineLabel,
         notice: issues.length
-          ? 'Some saved history is unavailable right now. You can still use your on-device routine.'
+          ? 'Remote history could not be refreshed. Your on-device routine is still available.'
           : owner ? null : 'Saved history needs a connected profile. Your routine is available on this device.',
       });
     })().catch((cause: unknown) => {
       if (!active) return;
-      setData(createStarterHomeData(cause instanceof Error ? cause.message : 'Your dashboard could not load. Please try again.'));
+      setData(createEmptyHomeData(cause instanceof Error ? cause.message : 'Your dashboard could not load. Please try again.'));
     });
     return () => { active = false; };
   }, [refreshKey]));
@@ -188,58 +178,73 @@ export default function HomeScreen() {
             </Pressable>
           </View>
 
-          <View style={[styles.summary, { marginTop: 12 * scale, paddingVertical: 12 * scale }]}>
-            <View style={[styles.progressRing, { width: 134 * scale, height: 134 * scale }]}>
+          {data?.totalCount ? <View style={[styles.summary, { marginTop: 12 * scale, paddingVertical: 12 * scale }]}>
+            <View accessibilityLabel={`Routine today: ${checkedPercent}% complete, ${data.checkedCount} of ${data.totalCount} steps checked`} style={[styles.progressRing, { width: 134 * scale, height: 134 * scale }]}>
               <Svg width={134 * scale} height={134 * scale} viewBox="0 0 108 108" style={StyleSheet.absoluteFill}>
                 <Circle cx="54" cy="54" r="48" fill="none" stroke="#312B25" strokeWidth="4.5" />
                 <Circle cx="54" cy="54" r="48" fill="none" stroke="#E8C9A0" strokeWidth="4.5" strokeLinecap="round" strokeDasharray={`${ringCircumference}`} strokeDashoffset={ringCircumference * (1 - checkedPercent / 100)} transform="rotate(-90 54 54)" />
               </Svg>
-              <Text style={[styles.ringValue, { fontSize: 38 * scale }]}>{data ? `${checkedPercent}%` : '—'}</Text>
+              <Text style={[styles.ringValue, { fontSize: 38 * scale }]}>{checkedPercent}%</Text>
               <Text style={[styles.ringLabel, { fontSize: 11 * scale }]}>ROUTINE TODAY</Text>
             </View>
-            <Text style={[styles.summaryLine, { fontSize: 13 * scale }]}>
-              {data?.totalCount ? `${data.checkedCount} of ${data.totalCount} steps checked` : 'Your routine progress will appear here'}
-            </Text>
+            <Text style={[styles.summaryLine, { fontSize: 13 * scale }]}>{data.checkedCount} of {data.totalCount} steps checked</Text>
             <View style={styles.updatedLine}><Text style={styles.clockGlyph}>◷</Text><Text style={[styles.updatedText, { fontSize: 12 * scale }]}>Updates as you check off steps</Text></View>
-          </View>
+          </View> : <View style={[styles.summary, { marginTop: 12 * scale, paddingVertical: 18 * scale }]}>
+            <Text style={[styles.summaryLine, { fontSize: 15 * scale }]}>Your routine will appear after your first scan</Text>
+            <Text style={[styles.updatedText, { fontSize: 12 * scale }]}>Your guidance will be made for you.</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Start a skin scan"
+              onPress={() => router.push('/upload')}
+              style={({ pressed }) => [styles.scanCta, { marginTop: 14 * scale, paddingHorizontal: 18 * scale, paddingVertical: 10 * scale, borderRadius: 22 * scale, opacity: pressed ? 0.82 : 1 }]}
+            >
+              <Text style={[styles.scanCtaText, { fontSize: 12 * scale }]}>Scan your skin</Text>
+            </Pressable>
+          </View>}
 
-          <View style={[styles.stats, { gap: 10 * scale, marginTop: 14 * scale }]}>
-            <View style={[styles.statCard, { borderRadius: 18 * scale, minHeight: 92 * scale, padding: 13 * scale }]}>
+          {data?.totalCount ? <View style={[styles.stats, { gap: 10 * scale, marginTop: 14 * scale }]}>
+            <View accessibilityLabel={`Routine streak: ${data ? `${data.streak} ${data.streak === 1 ? 'day' : 'days'}` : 'loading'}`} style={[styles.statCard, { borderRadius: 18 * scale, minHeight: 92 * scale, padding: 13 * scale }]}>
               <Text style={[styles.statLabel, { fontSize: 12 * scale }]}>Streak</Text>
               <Text style={[styles.statValue, { fontSize: 27 * scale }]}>{data ? `${data.streak} ${data.streak === 1 ? 'day' : 'days'}` : '—'}</Text>
             </View>
-            <View style={[styles.statCard, { borderRadius: 18 * scale, minHeight: 92 * scale, padding: 13 * scale }]}>
+            <View accessibilityLabel={`Routine completion: ${data ? `${checkedPercent}%` : 'loading'}`} style={[styles.statCard, { borderRadius: 18 * scale, minHeight: 92 * scale, padding: 13 * scale }]}>
               <Text style={[styles.statLabel, { fontSize: 12 * scale }]}>Routine done</Text>
               <Text style={[styles.statValue, { fontSize: 27 * scale }]}>{data ? `${checkedPercent}%` : '—'}</Text>
               <Text style={[styles.statHint, { fontSize: 10 * scale }]}>{data ? `${data.checkedCount}/${data.totalCount} steps today` : 'Loading progress'}</Text>
             </View>
-          </View>
+          </View> : null}
 
           <Text style={[styles.routineLabel, { marginTop: 18 * scale }]}>{data.routineLabel}</Text>
-          <SectionHeading title="Routines" trailing="See all" onPress={() => router.push('/routine')} />
-          <View style={styles.routineCards}>
-            <Pressable accessibilityRole="button" onPress={() => router.push('/routine')} style={[styles.routineCard, { minHeight: 77 * scale, borderRadius: 17 * scale, paddingHorizontal: 12 * scale, gap: 11 * scale }]}>
+          <SectionHeading title="Your routine" trailing="See all" onPress={() => router.push('/routine')} />
+          {data.totalCount === 0 ? (
+            <Pressable accessibilityRole="button" onPress={() => router.push('/upload')} style={[styles.emptyRoutine, { borderRadius: 18 * scale, padding: 18 * scale, marginTop: 10 * scale }]}>
+              <Text style={[styles.emptyRoutineTitle, { fontSize: 16 * scale }]}>No routine yet</Text>
+              <Text style={[styles.emptyRoutineCopy, { fontSize: 11 * scale, lineHeight: 17 * scale }]}>Scan your skin to get guidance made for you.</Text>
+              <Text style={[styles.emptyRoutineAction, { fontSize: 11 * scale }]}>Start your scan  ›</Text>
+            </Pressable>
+          ) : <View style={styles.routineCards}>
+            <Pressable accessibilityRole="button" onPress={() => router.push('/routine')} style={({ pressed }) => [styles.routineCard, { minHeight: 77 * scale, borderRadius: 17 * scale, paddingHorizontal: 12 * scale, gap: 11 * scale, opacity: pressed ? 0.82 : 1 }]}>
               <View style={[styles.routineIcon, { width: 48 * scale, height: 48 * scale, borderRadius: 14 * scale }]}><RoutineIcon size={29 * scale} /></View>
               <View style={styles.routineCopy}>
-                <Text style={[styles.routineTitle, { fontSize: 15 * scale }]}>Morning Routine</Text>
+                <Text style={[styles.routineTitle, { fontSize: 15 * scale }]}>Morning</Text>
                 <Text style={[styles.routineMeta, { fontSize: 11 * scale }]}>8 AM · {data?.morningCount ?? '—'} steps</Text>
               </View>
               <Text style={styles.chevron}>›</Text>
             </Pressable>
-            <Pressable accessibilityRole="button" onPress={() => router.push('/routine')} style={[styles.routineCard, { minHeight: 77 * scale, borderRadius: 17 * scale, paddingHorizontal: 12 * scale, gap: 11 * scale }]}>
+            <Pressable accessibilityRole="button" onPress={() => router.push('/routine')} style={({ pressed }) => [styles.routineCard, { minHeight: 77 * scale, borderRadius: 17 * scale, paddingHorizontal: 12 * scale, gap: 11 * scale, opacity: pressed ? 0.82 : 1 }]}>
               <View style={[styles.routineIcon, { width: 48 * scale, height: 48 * scale, borderRadius: 14 * scale }]}><RoutineIcon evening size={27 * scale} /></View>
               <View style={styles.routineCopy}>
-                <Text style={[styles.routineTitle, { fontSize: 15 * scale }]}>Evening Routine</Text>
+                <Text style={[styles.routineTitle, { fontSize: 15 * scale }]}>Evening</Text>
                 <Text style={[styles.routineMeta, { fontSize: 11 * scale }]}>9 PM · {data?.eveningCount ?? '—'} steps</Text>
               </View>
               <Text style={styles.chevron}>›</Text>
             </Pressable>
-          </View>
+          </View>}
           <SectionHeading title="Skin Diary" trailing={data ? `${data.diary.length} ${data.diary.length === 1 ? 'check-in' : 'check-ins'}` : undefined} onPress={() => router.push('/skin-diary')} />
           {data?.diary.length ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.diaryStrip, { gap: 10 * scale }]}>
               {data.diary.map(entry => (
-                <Pressable key={entry.date} accessibilityRole="button" onPress={() => router.push('/skin-diary')} style={[styles.diaryCard, { width: 150 * scale, minHeight: 116 * scale, borderRadius: 16 * scale, padding: 13 * scale }]}>
+                <Pressable key={entry.date} accessibilityRole="button" onPress={() => router.push('/skin-diary')} style={({ pressed }) => [styles.diaryCard, { width: 150 * scale, minHeight: 116 * scale, borderRadius: 16 * scale, padding: 13 * scale, opacity: pressed ? 0.82 : 1 }]}>
                   <Text style={[styles.diaryDate, { fontSize: 10 * scale }]}>{dateLabel(entry.date)}</Text>
                   <Text numberOfLines={2} style={[styles.diaryFeeling, { fontSize: 14 * scale, lineHeight: 18 * scale }]}>{entry.feeling ?? 'Personal check-in'}</Text>
                   <Text numberOfLines={2} style={[styles.diaryDetail, { fontSize: 10 * scale, lineHeight: 14 * scale }]}>{entry.concerns.length ? entry.concerns.join(' · ') : 'Your own note · private diary'}</Text>
@@ -289,11 +294,13 @@ const styles = StyleSheet.create({
   ringValue: { color: '#FFFFFF', fontFamily: 'InterRegular', letterSpacing: -1.4 },
   ringLabel: { color: '#E8C9A0', fontFamily: 'InterMedium', marginTop: -2 },
   summaryLine: { color: '#E8C9A0', fontFamily: 'InterSemibold', textAlign: 'center', marginTop: 10 },
+  scanCta: { backgroundColor: '#E8C9A0' },
+  scanCtaText: { color: '#181613', fontFamily: 'InterSemibold' },
   updatedLine: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
   clockGlyph: { color: '#E8C9A0', fontSize: 17, lineHeight: 19 },
   updatedText: { color: '#9A9698', fontFamily: 'InterRegular' },
   stats: { flexDirection: 'row' },
-  statCard: { flex: 1, backgroundColor: '#1A1A1C', alignItems: 'center', justifyContent: 'center' },
+  statCard: { flex: 1, backgroundColor: '#1A1A1C', borderWidth: 1, borderColor: '#2A2A2C', alignItems: 'center', justifyContent: 'center' },
   statLabel: { color: '#969195', fontFamily: 'InterMedium' },
   statValue: { color: '#FFFFFF', fontFamily: 'InterSemibold', marginTop: 3, letterSpacing: -0.5 },
   statHint: { color: '#A29DA1', fontFamily: 'InterRegular', marginTop: 1 },
@@ -302,7 +309,11 @@ const styles = StyleSheet.create({
   routineLabel: { color: '#8A8586', fontFamily: 'InterSemibold', fontSize: 9, letterSpacing: 1.25, marginBottom: 3 },
   sectionAction: { color: '#E8C9A0', fontFamily: 'InterSemibold', fontSize: 13 },
   routineCards: { gap: 9 },
-  routineCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1A1A1C' },
+  emptyRoutine: { backgroundColor: '#1A1A1C', borderWidth: 1, borderColor: '#3A332B' },
+  emptyRoutineTitle: { color: '#F8F7F7', fontFamily: 'InterSemibold' },
+  emptyRoutineCopy: { color: '#AAA3A7', fontFamily: 'InterRegular', marginTop: 5 },
+  emptyRoutineAction: { color: '#E8C9A0', fontFamily: 'InterSemibold', marginTop: 12 },
+  routineCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1A1A1C', borderWidth: 1, borderColor: '#2A2A2C' },
   routineIcon: { backgroundColor: '#2A2A2C', alignItems: 'center', justifyContent: 'center' },
   routineCopy: { flex: 1 },
   routineTitle: { color: '#F8F7F7', fontFamily: 'InterSemibold' },

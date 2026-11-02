@@ -53,7 +53,7 @@ The current analysis is cosmetic-only. It describes visible characteristics, doe
 
 ### Identifiers
 
-- RevenueCat entitlement: `skinsnap_premium`
+- RevenueCat entitlement: `SkinSnap Pro`
 - RevenueCat default offering: `default`
 - Weekly Google Play product: `skinsnap_weekly_499` (one-week auto-renewing base plan)
 - Monthly Google Play product: `skinsnap_monthly_1299` (one-month auto-renewing base plan)
@@ -61,7 +61,7 @@ The current analysis is cosmetic-only. It describes visible characteristics, doe
 - Exclusive annual Google Play product: `skinsnap_yearly_downsell` (one-year auto-renewing base plan)
 - RevenueCat downsell offering: `yearly_downsell`
 
-Configure the US Google Play base-plan prices as $4.99/week, $12.99/month, and $49.99/year. Regional prices are localized by Google Play and fetched from RevenueCat at runtime; the app does not substitute hard-coded prices when products are unavailable. Configure no free trials or introductory prices. Attach the weekly, monthly, and annual products to the single `skinsnap_premium` entitlement and put all three packages in `default`. Keep the separate annual downsell package in `yearly_downsell`. Configure the downsell as a separate annual subscription product/base plan, not a client-selected Play offer: Google Play offer eligibility is store-controlled and cannot guarantee that a particular promotional offer is purchasable for every account. The annual savings badge is calculated from the monthly and annual store prices and appears only when both are available in the same currency.
+Configure the Google Play base-plan prices in RevenueCat. Regional prices are localized by Google Play and fetched from the `default` offering at runtime; the app does not substitute hard-coded prices when products are unavailable. Configure no free trials or introductory prices. Attach the weekly, monthly, and annual products to the single `SkinSnap Pro` entitlement and put all three packages in `default`.
 
 ### Runtime configuration
 

@@ -35,8 +35,8 @@ const CATEGORY_HINTS: [RegExp, string][] = [
   [/\bcleanser|cleansing\b/i, 'Cleanser'],
   [/\btoner\b/i, 'Toner'],
   [/\bserum\b/i, 'Serum'],
-  [/\bmoisturi[sz]er|cream\b/i, 'Moisturizer'],
-  [/\bsunscreen|spf\b/i, 'Sun protection'],
+  [/\bmoisturi[sz]er|cream\b/i, 'Face care'],
+  [/\bsunscreen|spf\b/i, 'Sun care'],
   [/\bexfoliat|aha|bha\b/i, 'Exfoliant'],
   [/\boil\b/i, 'Face oil'],
 ];
@@ -67,7 +67,7 @@ export function buildRoutineSteps(guidance: readonly string[], period: RoutinePe
         ? firstPhrase.replace(/^(use|apply|finish with|follow with)\s+/i, '')
         : category;
       const frequency = text.match(/\b(daily|once daily|twice daily|once weekly|twice weekly|every \w+)\b/i)?.[0]
-        ?? 'Not specified in the saved guidance';
+        ?? 'Follow the saved guidance';
 
       return {
         id: `${period}-${index + 1}`,
@@ -102,18 +102,9 @@ export function restoreRoutineGuidance(
   const precautions = filterRoutineGuidance(guidance.precautions);
   const usesGeneralGuidance = morning.items.length === 0 || evening.items.length === 0;
   return {
-    morningRoutine: morning.items.length ? morning.items : [
-      'Rinse gently with lukewarm water.',
-      'Apply a moisturizer that suits your skin.',
-      'Use broad-spectrum sunscreen as directed on its label.',
-    ],
-    eveningRoutine: evening.items.length ? evening.items : [
-      'Cleanse gently to remove sunscreen and daily buildup.',
-      'Apply a moisturizer that suits your skin.',
-    ],
-    precautions: precautions.items.length ? precautions.items : [
-      'Introduce products one at a time, follow their labels, and stop use if irritation occurs.',
-    ],
+    morningRoutine: morning.items,
+    eveningRoutine: evening.items,
+    precautions: precautions.items,
     usesGeneralGuidance,
     removedUnsupportedGuidance: morning.removed || evening.removed || precautions.removed,
   };
@@ -127,10 +118,10 @@ export function routineTip(
   const firstPrecaution = precautions.find((value) => value.trim().length > 0);
   if (firstPrecaution) return `From your saved guidance: ${firstPrecaution.trim()}`;
   if (morning.some((item) => /\bsunscreen|\bspf\b/i.test(item))) {
-    return 'Your morning guidance includes sun protection. Apply products in the listed order and follow each product label.';
+    return 'Your morning guidance includes sun care. Use the products in order and follow each label.';
   }
   if (morning.length || evening.length) {
-    return 'Introduce new products one at a time, follow their labels, and stop use if irritation occurs.';
+    return 'Add one new product at a time. Follow its label. Stop if your skin feels sore.';
   }
   return 'Complete a skin analysis to receive routine guidance and related safety tips.';
 }

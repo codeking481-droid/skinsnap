@@ -793,7 +793,7 @@ test('admin identity does not bypass premium entitlement or production analysis 
     }
     if (url.includes('/v1/subscribers/')) {
       return new Response(JSON.stringify({
-        subscriber: { entitlements: { skinsnap_premium: { expires_date: null } } },
+        subscriber: { entitlements: { 'SkinSnap Pro': { expires_date: null } } },
       }), { status: 200 });
     }
     if (url.endsWith('/rest/v1/rpc/reserve_skinsnap_analysis')) {

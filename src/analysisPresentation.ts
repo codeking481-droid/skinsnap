@@ -54,7 +54,7 @@ export function presentObservation(observation: SkinObservation): PresentedObser
 
 export function noObservationMessage(imageQuality: SkinAnalysisResult['imageQuality']): string {
   return imageQuality === 'limited'
-    ? 'Your photo did not provide enough detail for specific observations. You can try another photo in soft, even lighting.'
+    ? 'Limited detail in this light. Try soft window light, no direct sun, fill the oval for a clearer snapshot.'
     : 'No distinct cosmetic features could be reliably described. This report does not add guesses.';
 }
 

@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { loadRoutineProgress, saveRoutineProgress } from '../routineStorage';
@@ -18,6 +18,7 @@ import { loadCustomRoutine } from '../services/retentionApi';
 import { scheduledSteps, type CustomRoutine } from '../retention';
 import { MainBottomNav } from '../components/MainBottomNav';
 import { getRoutineProgressOwner } from '../services/userDataApi';
+import { responsiveScale } from '../responsive';
 import { loadAnalysisHistory, type AnalysisHistoryItem } from '../services/authApi';
 import {
   buildRoutineSteps,
@@ -27,27 +28,11 @@ import {
 } from '../routinePresentation';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const DEMO_ROUTINE = {
-  morningRoutine: [
-    'Gentle Cream Cleanser. Step 1 · 60s · Cleanse impurities.',
-    'Vitamin C Serum. Step 2 · 3–4 drops · Brighten & protect.',
-    'Daily SPF 50 Sunscreen. Step 3 · 2-finger rule · Reapply as needed.',
-  ],
-  eveningRoutine: [
-    'Overnight Repair Cleanser. Step 1 · 60s · Remove makeup & dirt.',
-    'Retinol Serum. Step 2 · Pea-size · Smooth & renew.',
-    'Hydrating Moisturizer. Step 3 · Night cream · Lock in hydration.',
-  ],
-  precautions: ['General example only. Follow product labels and patch test new products.'],
-};
-
 type RoutineGuidance = Pick<AnalysisHistoryItem, 'morningRoutine' | 'eveningRoutine' | 'precautions'>;
 
 export default function RoutineScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ demo?: string }>();
-  const demoMode = __DEV__ && params.demo === 'true';
   const [period, setPeriod] = useState<RoutinePeriod>('Morning');
   const [completedDays, setCompletedDays] = useState<string[]>([]);
   const [checked, setChecked] = useState<string[]>([]);
@@ -55,19 +40,19 @@ export default function RoutineScreen() {
   const [customNotice, setCustomNotice] = useState<string | null>(null);
   const [routineId, setRoutineId] = useState<string | undefined>();
   const [owner, setOwner] = useState<string | null>(null);
-  const [routine, setRoutine] = useState<RoutineGuidance | null>(demoMode ? DEMO_ROUTINE : null);
+  const [routine, setRoutine] = useState<RoutineGuidance | null>(null);
   const [generalRoutine, setGeneralRoutine] = useState(false);
   const [safetyNotice, setSafetyNotice] = useState<string | null>(null);
-  const [loading, setLoading] = useState(!demoMode);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [syncStatus, setSyncStatus] = useState(demoMode ? 'DEMO MODE · progress is stored on this device' : 'Loading your saved routine…');
+  const [syncStatus, setSyncStatus] = useState('Loading your saved routine…');
   const [selectedStep, setSelectedStep] = useState<RoutineStep | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const [loaded, setLoaded] = useState(demoMode);
+  const [loaded, setLoaded] = useState(false);
   const [progressChanged, setProgressChanged] = useState(false);
-  const scale = Math.max(0.92, Math.min(Math.min(width, 520) / 393, 1.08));
+  const scale = responsiveScale(width);
 
-  const calendarDay = new Date().getDay();
+  const calendarDay = (new Date().getDay() + 6) % 7;
   const presentSteps = useCallback((value: RoutinePeriod): RoutineStep[] => customRoutine
     ? scheduledSteps(customRoutine, calendarDay, value).map((step, index) => ({ id: step.id, order: index + 1, title: step.name, instructions: step.description || 'Your custom routine step.', category: 'Your own step', ingredients: [], frequency: 'On your selected days' }))
     : buildRoutineSteps(value === 'Morning' ? routine?.morningRoutine ?? [] : routine?.eveningRoutine ?? [], value), [calendarDay, customRoutine, routine]);
@@ -76,7 +61,6 @@ export default function RoutineScreen() {
   const allStepIds = useMemo(() => [...morningSteps, ...eveningSteps].map(step => step.id), [morningSteps, eveningSteps]);
 
   useFocusEffect(useCallback(() => {
-    if (demoMode) return undefined;
     let active = true;
     setLoading(true);
     setSyncStatus(reloadKey ? 'Refreshing your saved routine...' : 'Loading your saved routine...');
@@ -104,10 +88,10 @@ export default function RoutineScreen() {
         setChecked(savedProgress.checkedSteps);
         setCompletedDays(savedProgress.completedDays);
         if (!accountId) {
-          setRoutine(DEMO_ROUTINE);
-          setGeneralRoutine(true);
-          setSafetyNotice('This is a general example, not personalized guidance. Follow product labels and stop use if irritation occurs.');
-          setSyncStatus(`${accountMessage ?? 'Secure account history is unavailable.'} Routine completion is saved on this device.`);
+          setRoutine(null);
+          setGeneralRoutine(false);
+          setSafetyNotice(null);
+          setSyncStatus(accountMessage ?? 'Your routine will appear after your first scan.');
           setLoaded(true);
           return;
         }
@@ -129,21 +113,28 @@ export default function RoutineScreen() {
           setRoutine({ morningRoutine: custom.steps.filter(s => s.period === 'Morning').map(s => s.description || s.name), eveningRoutine: custom.steps.filter(s => s.period === 'Evening').map(s => s.description || s.name), precautions: [] });
           setSafetyNotice("Your routine is customizable. SkinSnap doesn't verify the safety of products you add.");
         } else if (!latest) {
-          setRoutine(DEMO_ROUTINE);
-          setGeneralRoutine(true);
-          setSafetyNotice('This is a general example, not personalized guidance. Complete an authorized analysis for saved AI-assisted guidance.');
+          setRoutine(null);
+          setGeneralRoutine(false);
+          setSafetyNotice(null);
         } else {
           const restored = restoreRoutineGuidance(latest);
-          setRoutine({
+          const hasGuidance = restored.morningRoutine.length > 0 || restored.eveningRoutine.length > 0;
+          setRoutine(hasGuidance ? {
             morningRoutine: restored.morningRoutine,
             eveningRoutine: restored.eveningRoutine,
             precautions: restored.precautions,
-          });
-          setGeneralRoutine(restored.usesGeneralGuidance);
+          } : null);
+          setGeneralRoutine(false);
+          if (!hasGuidance) {
+            setSafetyNotice(null);
+            setSyncStatus('Your routine will appear when your scan has saved guidance.');
+            setLoaded(true);
+            return;
+          }
           if (restored.usesGeneralGuidance) {
             setSafetyNotice(restored.removedUnsupportedGuidance
-              ? 'Some saved guidance could not be shown. General, non-personalized steps are shown for the missing part of your routine.'
-              : 'No saved steps were available for part of your routine. General, non-personalized steps are shown instead.');
+              ? 'Some saved guidance could not be shown. The rest of your saved guidance is still available.'
+              : 'Some saved guidance is missing. The available guidance is still shown.');
           } else if (restored.removedUnsupportedGuidance) {
             setSafetyNotice('Some saved guidance was hidden because it did not meet SkinSnap’s non-diagnostic safety standards.');
           } else {
@@ -163,14 +154,14 @@ export default function RoutineScreen() {
       }
     })();
     return () => { active = false; };
-  }, [demoMode, reloadKey]));
+  }, [reloadKey]));
 
   useEffect(() => {
-    if (!loaded || demoMode || !progressChanged || !routine) return undefined;
+    if (!loaded || !progressChanged || !routine) return undefined;
     const snapshot = { checkedSteps: checked, completedDays };
     void saveRoutineProgress(snapshot, owner ?? undefined, routineId)
       .catch(() => setSyncStatus('Progress could not be saved on this device. Please try again.'));
-  }, [checked, completedDays, demoMode, loaded, owner, routineId, progressChanged, routine]);
+  }, [checked, completedDays, loaded, owner, routineId, progressChanged, routine]);
 
   const today = new Date();
   const currentDayIndex = (today.getDay() + 6) % 7;
@@ -211,7 +202,7 @@ export default function RoutineScreen() {
           {name === 'Morning'
             ? <SunIcon size={22 * scale} color="#D4B896" />
             : <MoonIcon size={21 * scale} color="#D4B896" />}
-          <Text style={[styles.sectionTitle, { fontSize: 17 * scale }]}>{name} Routine</Text>
+          <Text style={[styles.sectionTitle, { fontSize: 17 * scale }]}>{name}</Text>
         </View>
         <Text style={[styles.sectionMeta, { fontSize: 11 * scale }]}>{time} · {sectionSteps.length} steps</Text>
       </View>
@@ -257,9 +248,7 @@ export default function RoutineScreen() {
             </Pressable>
           </View>
 
-          {demoMode
-            ? <Text style={[styles.demoNotice, { fontSize: 9 * scale, marginTop: 4 * scale }]}>DEMO ROUTINE · GENERAL EXAMPLE, NOT PERSONALIZED</Text>
-            : routine
+          {routine
               ? <Text style={[styles.demoNotice, { fontSize: 9 * scale, marginTop: 4 * scale }]}>{generalRoutine ? 'GENERAL ROUTINE · NOT PERSONALIZED' : customRoutine ? 'YOUR CUSTOM ROUTINE' : 'YOUR SAVED AI-ASSISTED GUIDANCE'} · NON-DIAGNOSTIC</Text>
               : null}
           {customNotice && <Text style={[styles.syncStatus, { fontSize: 10 * scale, lineHeight: 15 * scale, marginTop: 5 * scale }]}>{customNotice}</Text>}
@@ -277,6 +266,14 @@ export default function RoutineScreen() {
               <Text style={styles.stateText}>{error}</Text>
               <Pressable accessibilityRole="button" onPress={reload} style={styles.secondaryAction}><Text style={styles.secondaryActionText}>Try again</Text></Pressable>
             </View>
+          ) : !routine ? (
+            <View style={[styles.stateCard, { marginTop: 16 * scale, padding: 22 * scale }]}>
+              <Text accessibilityRole="header" style={styles.stateTitle}>Your routine is waiting</Text>
+              <Text style={styles.stateText}>Complete your first skin scan to receive guidance made for you.</Text>
+              <Pressable accessibilityRole="button" onPress={() => router.push('/upload')} style={styles.primaryAction}>
+                <Text style={styles.primaryActionText}>Scan your skin</Text>
+              </Pressable>
+            </View>
           ) : (
             <>
               <View style={[styles.scoreCard, { marginTop: 12 * scale, borderRadius: 16 * scale, padding: 15 * scale }]}>
@@ -290,7 +287,7 @@ export default function RoutineScreen() {
                 </View>
                 <View style={styles.scoreCopy}>
                   <Text style={[styles.scoreHeading, { fontSize: 20 * scale, lineHeight: 25 * scale }]}>{completedStepCount} of {allStepIds.length} done</Text>
-                  <Text style={[styles.scoreDetail, { fontSize: 11 * scale, lineHeight: 16 * scale, marginTop: 3 * scale }]}>Routine progress · based on your checkmarks today</Text>
+                  <Text style={[styles.scoreDetail, { fontSize: 11 * scale, lineHeight: 16 * scale, marginTop: 3 * scale }]}>Your progress today — based on what you checked</Text>
                   <View style={[styles.updatedPill, { marginTop: 8 * scale, paddingHorizontal: 10 * scale, paddingVertical: 5 * scale }]}>
                     <Text style={[styles.updatedText, { fontSize: 9 * scale }]}>Updated today</Text>
                   </View>
@@ -366,12 +363,12 @@ function ProductIcon({ category, size }: { category: string; size: number }) {
       <Path d="M15 4h10v5H15zM17 9v7h6V9M13 16h14v26H13zM17 22h6M17 27h6" />
     </Svg>;
   }
-  if (/sun protection/i.test(category)) {
+  if (/sun\s*care|spf/i.test(category)) {
     return <Svg width={size} height={size} viewBox="0 0 40 48" fill="none" stroke={stroke} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
       <Path d="M8 7h24l-3 36H11L8 7ZM11 12h18M13 37h14M20 19v9m-4.5-4.5h9m-8-3.2 6.4 6.4m0-6.4-6.4 6.4" />
     </Svg>;
   }
-  if (/moisturizer/i.test(category)) {
+  if (/face\s*care|cream/i.test(category)) {
     return <Svg width={size} height={size} viewBox="0 0 40 48" fill="none" stroke={stroke} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
       <Path d="M8 15h24v25H8zM11 10h18v5H11zM14 7h12v3H14zM12 22h16" />
     </Svg>;
@@ -426,6 +423,8 @@ const styles = StyleSheet.create({
   stateText: { color: '#8A8A8A', fontFamily: 'InterRegular', fontSize: 14, lineHeight: 21, textAlign: 'center' },
   secondaryAction: { minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
   secondaryActionText: { color: '#E8C9A0', fontFamily: 'InterSemibold', fontSize: 14, textAlign: 'center' },
+  primaryAction: { minHeight: 46, paddingHorizontal: 24, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: '#D4B896' },
+  primaryActionText: { color: '#171311', fontFamily: 'InterExtraBold', fontSize: 14 },
   precautionCard: { width: '100%', borderWidth: 1, borderColor: '#2A2A2C', borderRadius: 16, backgroundColor: '#1A1A1C' },
   precautionTitle: { color: '#E8C9A0', fontFamily: 'InterSemibold' },
   precautionText: { color: '#8B9AB5', fontFamily: 'InterRegular' },

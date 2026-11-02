@@ -1,14 +1,26 @@
 import fs from 'node:fs/promises';
 const blockers = [];
 const config = JSON.parse(await fs.readFile('website/site-config.example.json', 'utf8'));
+const publishedConfig = JSON.parse(await fs.readFile('site-config.json', 'utf8').catch(() => '{}'));
 const purchases = await fs.readFile('src/paywallPresentation.ts', 'utf8');
 const eas = JSON.parse(await fs.readFile('eas.json', 'utf8'));
 const app = JSON.parse(await fs.readFile('app.json', 'utf8'));
 const nativeGradle = await fs.readFile('android/app/build.gradle', 'utf8').catch(() => '');
-if (!config.supportEmail) blockers.push('A verified working public support/privacy contact is missing.');
+const supportEmail = publishedConfig.support_email || config.supportEmail;
+const legalPublicationApproved = publishedConfig.legal_publication_approval === true || config.legalPublicationApproved;
+const deletionEnabled = publishedConfig.account_deletion_enabled === true || config.deletionEnabled;
+const legalUrls = [
+  publishedConfig.privacy_policy_url,
+  publishedConfig.terms_of_service_url,
+  publishedConfig.account_deletion_url,
+];
+if (!supportEmail) blockers.push('A verified working public support/privacy contact is missing.');
 if (!config.agePolicyApproved) blockers.push('The proposed 18+ audience and age safeguards require final approval.');
-if (!config.legalPublicationApproved) blockers.push('Public Privacy, Terms and Account Deletion URLs are not published or approved.');
-if (/SUBSCRIPTION_PURCHASES_ENABLED:\s*boolean\s*=\s*false/.test(purchases)) blockers.push('Production billing is deliberately disabled; the owner/brother must configure and verify RevenueCat and Play products.');
+if (!legalPublicationApproved || !deletionEnabled || legalUrls.some(url => !/^https:\/\//.test(url ?? ''))) blockers.push('Public Privacy, Terms and Account Deletion URLs are not published or approved.');
+if (!/EXPO_PUBLIC_SUBSCRIPTION_PURCHASES_ENABLED\s*===\s*['"]true['"]/.test(purchases)
+  || eas.build.production.env?.EXPO_PUBLIC_SUBSCRIPTION_PURCHASES_ENABLED !== 'true') {
+  blockers.push('Production billing is deliberately disabled; configure and verify RevenueCat and Play products before enabling it.');
+}
 if (!app.expo.extra?.eas?.projectId) blockers.push('EAS project identity and the established signing/build account need verification.');
 if (/release\s*\{[^}]*signingConfig signingConfigs\.debug/s.test(nativeGradle)) blockers.push('The existing generated native release build uses debug signing. Do not use it for a production AAB. Verify EAS signing without overwriting keys.');
 if (eas.build.production.env?.EXPO_PUBLIC_AI_DEV_TEST_MODE !== 'false') blockers.push('Production development-analysis flag is not explicitly disabled.');

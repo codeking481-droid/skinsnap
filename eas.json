@@ -20,10 +20,24 @@
       }
     },
     "production": {
-      "env": { "EXPO_PUBLIC_AI_DEV_TEST_MODE": "false" },
+      "env": {
+        "EXPO_PUBLIC_AI_DEV_TEST_MODE": "false",
+        "EXPO_PUBLIC_SUBSCRIPTION_PURCHASES_ENABLED": "true",
+        "EXPO_PUBLIC_REVENUECAT_ANDROID_KEY": "goog_ShQuwqesVuTdovXmHmGTokryajC",
+        "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY": "goog_ShQuwqesVuTdovXmHmGTokryajC",
+        "EXPO_PUBLIC_API_URL": "https://skinsnap.risewithalphatekx.workers.dev",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://pehjmojhezldzcedzcxi.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_UDEOh-mG9etwrSIUlfc7Aw_0YuC6s1i",
+        "EXPO_PUBLIC_LEGAL_URLS_VERIFIED": "true",
+        "EXPO_PUBLIC_PRIVACY_URL": "https://skinsnap-legal.pages.dev/privacy-policy.html",
+        "EXPO_PUBLIC_TERMS_URL": "https://skinsnap-legal.pages.dev/terms-of-service.html"
+      },
       "environment": "production",
       "distribution": "store",
-      "autoIncrement": true,
+      "cache": {
+        "disabled": true
+      },
+      "autoIncrement": false,
       "android": {
         "buildType": "app-bundle"
       }

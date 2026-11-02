@@ -415,7 +415,7 @@ async function performSkinAnalysis(
   }
   const url = backendUrl();
   if (!url) {
-    throw new AnalysisRequestError('service-unavailable', 'Secure analysis is not configured yet. Your photo has not been uploaded.');
+    throw new AnalysisRequestError('service-unavailable', 'Secure analysis is temporarily unavailable. Your photo has not been uploaded.');
   }
   let session: Awaited<ReturnType<typeof verifyAuthenticatedSession>>;
   try {
@@ -462,7 +462,7 @@ async function performSkinAnalysis(
     throw new AnalysisRequestError('authentication-required', 'Sign-in is required before a photo can be sent securely.', 'authentication');
   }
   if (mode === 'premium' && !isAnalysisResponseAllowed(true, Boolean(url), Boolean(token))) {
-    throw new AnalysisRequestError('service-unavailable', 'Secure analysis is not configured yet. Your photo has not been uploaded.');
+    throw new AnalysisRequestError('service-unavailable', 'Secure analysis is temporarily unavailable. Your photo has not been uploaded.');
   }
 
   const photo = await preparePhotoForUpload(photoUri);

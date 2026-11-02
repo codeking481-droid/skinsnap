@@ -6,7 +6,7 @@
 
 - Native SDK dependency: `react-native-purchases` 10.15.1.
 - Android application ID: `com.alphatekx.skinsnap`.
-- RevenueCat entitlement identifier: `skinsnap_premium`.
+- RevenueCat entitlement identifier: `SkinSnap Pro`.
 - Product identifiers:
   - `skinsnap_weekly`
   - `skinsnap_yearly`
@@ -44,7 +44,7 @@ The current purchase gate remains closed. No real billing or subscription author
 
 1. Create/confirm the Android app with package ID `com.alphatekx.skinsnap`.
 2. Import/link the exact Play product identifiers and base plans.
-3. Create entitlement `skinsnap_premium`, and attach only the intended subscriptions.
+3. Create entitlement `SkinSnap Pro`, and attach only the intended subscriptions.
 4. Create offering `default` containing the weekly/yearly packages expected by the app.
 5. If used, create offering `yearly_downsell` containing the exact downsell product.
 6. Verify package product identifiers, billing periods (`P1W` and `P1Y`), and no unexpected free/intro phases. The app rejects products with incompatible periods or introductory/free phases.

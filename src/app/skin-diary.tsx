@@ -186,8 +186,8 @@ export default function SkinDiaryScreen() {
           ? <ActivityIndicator color="#E8C9A0" style={styles.spinner} />
           : loadFailed
             ? <View style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>Diary unavailable</Text>
-              <Text style={styles.emptyText}>Your saved entries could not be loaded, so this screen is not showing an empty history.</Text>
+              <Text style={styles.emptyTitle}>Your diary is ready offline</Text>
+              <Text style={styles.emptyText}>We could not refresh remote entries, but saved entries on this device are still available.</Text>
               <Pressable accessibilityRole="button" onPress={() => setLoadAttempt(attempt => attempt + 1)} style={styles.emptyButton}><Text style={styles.emptyButtonText}>Try again</Text></Pressable>
             </View>
           : entries.length
@@ -254,11 +254,11 @@ export default function SkinDiaryScreen() {
             <Text style={styles.fieldLabel}>Routine today</Text>
             <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: draft.morningCompleted }} onPress={() => updateDraft({ morningCompleted: !draft.morningCompleted })} style={styles.routineRow}>
               <View style={[styles.checkbox, draft.morningCompleted && styles.checkboxSelected]}>{draft.morningCompleted && <Text style={styles.checkboxMark}>✓</Text>}</View>
-              <Text style={styles.routineText}>Morning routine completed</Text>
+              <Text style={styles.routineText}>Morning check-in completed</Text>
             </Pressable>
             <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: draft.eveningCompleted }} onPress={() => updateDraft({ eveningCompleted: !draft.eveningCompleted })} style={styles.routineRow}>
               <View style={[styles.checkbox, draft.eveningCompleted && styles.checkboxSelected]}>{draft.eveningCompleted && <Text style={styles.checkboxMark}>✓</Text>}</View>
-              <Text style={styles.routineText}>Evening routine completed</Text>
+              <Text style={styles.routineText}>Evening check-in completed</Text>
             </Pressable>
             <Text style={styles.formDisclosure}>Diary notes are self-reported. SkinSnap does not save photos in diary entries.</Text>
             {editorStatus ? <Text accessibilityLiveRegion="polite" style={styles.status}>{editorStatus}</Text> : null}

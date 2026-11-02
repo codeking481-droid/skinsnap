@@ -1,5 +1,35 @@
 import { ensureAuthenticatedSession, getSessionToken, sessionFailureMessage } from './session';
 import { parseSavedPreferences, parseCustomRoutine, parseDiaryEntry, restoreDiaryEntry, type SavedSkinPreferences, type CustomRoutine, type DiaryEntry } from '../retention';
+import { File, Paths } from 'expo-file-system';
+import { Platform } from 'react-native';
+import { readBrowserValue, writeBrowserValue } from '../platformStorage';
+
+const LOCAL_DIARY_KEY = 'skinsnap_diary_entries';
+
+function localDiaryFile(): File {
+  return new File(Paths.document, LOCAL_DIARY_KEY + '.json');
+}
+
+async function readLocalDiary(): Promise<DiaryEntry[]> {
+  const raw = Platform.OS === 'web'
+    ? readBrowserValue(LOCAL_DIARY_KEY)
+    : localDiaryFile().exists ? await localDiaryFile().text() : null;
+  if (!raw) return [];
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed)) throw new Error('Your on-device diary data could not be read safely.');
+  return parsed.map(item => restoreDiaryEntry(item).entry);
+}
+
+async function writeLocalDiary(entries: DiaryEntry[]): Promise<void> {
+  const raw = JSON.stringify(entries);
+  if (Platform.OS === 'web') {
+    writeBrowserValue(LOCAL_DIARY_KEY, raw);
+    return;
+  }
+  const file = localDiaryFile();
+  if (!file.exists) file.create({ intermediates: true });
+  await file.write(raw, { encoding: 'utf8' });
+}
 
 async function request(path: string, method = 'GET', body?: unknown): Promise<unknown> {
   const session = await ensureAuthenticatedSession();
@@ -49,27 +79,45 @@ export async function loadCustomRoutine(): Promise<CustomRoutine | null> {
 export async function saveCustomRoutine(value: CustomRoutine): Promise<void> { await request('routine/custom', 'PUT', parseCustomRoutine(value)); }
 export async function deleteCustomRoutine(): Promise<void> { await request('routine/custom', 'DELETE'); }
 export async function loadDiary(): Promise<{ entries: DiaryEntry[]; recovered: number; skipped: number }> {
-  const v = await request('diary');
-  if (!v || typeof v !== 'object' || !Array.isArray((v as Record<string, unknown>).items)) throw new Error('Diary response is invalid.');
-  const entries: DiaryEntry[] = [];
-  let recovered = 0;
-  let skipped = 0;
-  for (const item of (v as { items: unknown[] }).items) {
-    try {
-      const restored = restoreDiaryEntry(item);
-      entries.push(restored.entry);
-      if (restored.recovered) recovered += 1;
-    } catch {
-      skipped += 1;
+  try {
+    const v = await request('diary');
+    if (!v || typeof v !== 'object' || !Array.isArray((v as Record<string, unknown>).items)) throw new Error('Diary response is invalid.');
+    const entries: DiaryEntry[] = [];
+    let recovered = 0;
+    let skipped = 0;
+    for (const item of (v as { items: unknown[] }).items) {
+      try {
+        const restored = restoreDiaryEntry(item);
+        entries.push(restored.entry);
+        if (restored.recovered) recovered += 1;
+      } catch {
+        skipped += 1;
+      }
     }
+    await writeLocalDiary(entries);
+    return { entries, recovered, skipped };
+  } catch {
+    return { entries: await readLocalDiary(), recovered: 0, skipped: 0 };
   }
-  return { entries, recovered, skipped };
 }
-export async function saveDiary(value: DiaryEntry): Promise<void> { await request('diary', 'PUT', parseDiaryEntry(value)); }
-export async function deleteDiary(date: string): Promise<void> { await request(`diary/${encodeURIComponent(date)}`, 'DELETE'); }
+export async function saveDiary(value: DiaryEntry): Promise<void> {
+  const entry = parseDiaryEntry(value);
+  const entries = (await readLocalDiary()).filter(item => item.date !== entry.date);
+  await writeLocalDiary([...entries, entry]);
+  try { await request('diary', 'PUT', entry); } catch { /* local diary remains available offline */ }
+}
+export async function deleteDiary(date: string): Promise<void> {
+  await writeLocalDiary((await readLocalDiary()).filter(item => item.date !== date));
+  try { await request(`diary/${encodeURIComponent(date)}`, 'DELETE'); } catch { /* local deletion is complete */ }
+}
 export async function loadDiaryEntry(date: string): Promise<DiaryEntry | null> {
-  const v = await request(`diary?date=${encodeURIComponent(date)}`);
-  if (!v || typeof v !== 'object' || !Array.isArray((v as Record<string, unknown>).items)) throw new Error('Diary response is invalid.');
-  const items = (v as { items: unknown[] }).items;
-  return items.length ? restoreDiaryEntry(items[0]).entry : null;
+  try {
+    const v = await request(`diary?date=${encodeURIComponent(date)}`);
+    if (!v || typeof v !== 'object' || !Array.isArray((v as Record<string, unknown>).items)) throw new Error('Diary response is invalid.');
+    const items = (v as { items: unknown[] }).items;
+    return items.length ? restoreDiaryEntry(items[0]).entry : null;
+  } catch {
+    const entries = await readLocalDiary();
+    return entries.find(entry => entry.date === date) ?? null;
+  }
 }

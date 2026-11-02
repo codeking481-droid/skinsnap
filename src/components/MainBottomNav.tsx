@@ -19,7 +19,7 @@ function TabGlyph({ icon, active }: { icon: MainTab; active: boolean }) {
 
 function Tab({ icon, label, active, onPress }: { icon: MainTab; label: string; active: boolean; onPress: () => void }) {
   return (
-    <Pressable accessibilityRole="button" accessibilityState={{ selected: active }} onPress={onPress} style={styles.tab}>
+    <Pressable accessibilityRole="tab" accessibilityLabel={`${label} tab`} accessibilityState={{ selected: active }} onPress={onPress} style={styles.tab}>
       <TabGlyph icon={icon} active={active} />
       <Text style={[styles.tabLabel, active && styles.activeTabLabel]}>{label}</Text>
     </Pressable>

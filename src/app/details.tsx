@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePhoto } from '../PhotoContext';
 import { backOrReplace } from '../navigation';
 import { visibilityLabel } from '../analysisQuality';
+import { responsiveScale } from '../responsive';
 
 const CATEGORY_LABELS: Record<string, string> = {
   'visible-shine': 'Visible shine',
@@ -22,7 +23,7 @@ export default function DetailsScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { analysisResult } = usePhoto();
-  const scale = Math.max(0.9, Math.min(Math.min(width, 520) / 393, 1.08));
+  const scale = responsiveScale(width);
 
   return <View style={styles.screen}><ScrollView contentContainerStyle={[styles.scroll, { minHeight: height }]} showsVerticalScrollIndicator={false}>
     <View style={[styles.page, { width: Math.min(width, 520), paddingHorizontal: 18 * scale, paddingTop: Math.max(insets.top, 12 * scale), paddingBottom: Math.max(insets.bottom, 18 * scale) }]}>

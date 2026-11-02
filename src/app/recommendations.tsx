@@ -5,12 +5,13 @@ import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePhoto } from '../PhotoContext';
 import { backOrReplace } from '../navigation';
+import { responsiveScale } from '../responsive';
 
 export default function RecommendationsScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { analysisResult } = usePhoto();
-  const scale = Math.max(0.9, Math.min(Math.min(width, 520) / 393, 1.08));
+  const scale = responsiveScale(width);
   return <View style={styles.screen}><ScrollView contentContainerStyle={[styles.scroll, { minHeight: height }]} showsVerticalScrollIndicator={false}>
     <View style={[styles.page, { width: Math.min(width, 520), paddingHorizontal: 18 * scale, paddingTop: Math.max(insets.top, 12 * scale), paddingBottom: Math.max(insets.bottom, 18 * scale) }]}>
       <LinearGradient colors={['#101010', '#0A0A0A', '#0A0A0A']} locations={[0, 0.43, 1]} style={StyleSheet.absoluteFill} pointerEvents="none" />

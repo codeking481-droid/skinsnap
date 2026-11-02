@@ -177,6 +177,9 @@ export function CinematicSkinScanner({ onBack }: { onBack: () => void }) {
 
           <View style={[styles.progressSection, { marginTop: 17 * scale }]}>
             <ElapsedTime scale={scale} />
+            <View accessibilityLabel="Analysis is in progress" style={[styles.progressTrack, { height: 6 * scale, borderRadius: 4 * scale, marginTop: 11 * scale }]}>
+              <LinearGradient colors={['#9D73D8', '#E8C9A0']} style={[styles.progressFill, { width: '62%', borderRadius: 4 * scale }]} />
+            </View>
             <Text style={[styles.waitNotice, { fontSize: 10 * scale, marginTop: 9 * scale }]}>
               The image model must return its observations before SkinSnap can build your result. Analysis may take up to about two minutes; no score or observation is invented while you wait.
             </Text>
@@ -206,6 +209,8 @@ const styles = StyleSheet.create({
   title: { color: '#FFFFFF', fontFamily: 'InterSemibold', textAlign: 'center', letterSpacing: -0.7 },
   subtitle: { color: '#C4BACB', fontFamily: 'InterRegular', textAlign: 'center' },
   progressSection: { width: '100%', maxWidth: 360 },
+  progressTrack: { width: '100%', overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.12)' },
+  progressFill: { height: '100%' },
   elapsed: { color: '#D9C9DC', fontFamily: 'InterSemibold', textAlign: 'center' },
   waitNotice: { color: '#B7AEBE', fontFamily: 'InterRegular', textAlign: 'center', lineHeight: 16 },
   cancelButton: { marginTop: 7, paddingHorizontal: 14, paddingVertical: 8 },

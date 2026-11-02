@@ -85,7 +85,9 @@ export function restoreDiaryEntry(v: unknown): { entry: DiaryEntry; recovered: b
 export function routineFromAnalysis(result: { resultId: string; morningRoutine: string[]; eveningRoutine: string[] }): CustomRoutine {
   return { version: 1, sourceResultId: result.resultId, steps: (['Morning', 'Evening'] as const).flatMap(period =>
     (period === 'Morning' ? result.morningRoutine : result.eveningRoutine).map((text, index) => ({
-      id: `step-${period.toLowerCase()}-${index + 1}`, name: `${period} step ${index + 1}`, description: text,
+      id: `step-${period.toLowerCase()}-${index + 1}`,
+      name: text.split(/[.!?]/, 1)[0]?.trim().slice(0, 80) || `Saved ${period.toLowerCase()} guidance`,
+      description: text,
       period, days: [0, 1, 2, 3, 4, 5, 6],
     }))) };
 }

@@ -14,7 +14,7 @@ import {
 } from '../src/subscriptionRules.ts';
 
 test('subscription product and premium entitlement identifiers stay stable', () => {
-  assert.equal(PREMIUM_ENTITLEMENT_ID, 'skinsnap_premium');
+  assert.equal(PREMIUM_ENTITLEMENT_ID, 'SkinSnap Pro');
   assert.deepEqual(SUBSCRIPTION_PRODUCTS, {
     weekly: 'skinsnap_weekly_499',
     monthly: 'skinsnap_monthly_1299',

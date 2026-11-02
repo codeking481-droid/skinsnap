@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CinematicSkinScanner } from '../components/CinematicSkinScanner';
@@ -9,10 +9,10 @@ import { usePhoto } from '../PhotoContext';
 import { backOrReplace } from '../navigation';
 import { AnalysisRequestError, requestSkinAnalysis, type SkinAnalysisResult } from '../services/analysisApi';
 import { developmentAnalysisEnabled } from '../releasePolicy';
+import { getVerifiedEntitlement } from '../services/billing';
+import { responsiveScale } from '../responsive';
 
 const requestKey = () => `analysis-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const developmentTestMode = developmentAnalysisEnabled(__DEV__, process.env.EXPO_PUBLIC_AI_DEV_TEST_MODE);
-
 function stageLabel(stage: string | null): string {
   switch (stage) {
     case 'dimensions': return 'IMAGE DIMENSIONS';
@@ -34,6 +34,9 @@ function stageLabel(stage: string | null): string {
 export default function AnalysisScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ mode?: string }>();
+  const developmentTestMode = developmentAnalysisEnabled(__DEV__, process.env.EXPO_PUBLIC_AI_DEV_TEST_MODE)
+    && params.mode === 'development';
   const {
     photoUri,
     photoUploadConsent,
@@ -53,7 +56,7 @@ export default function AnalysisScreen() {
   const active = useRef(true);
   const completedOutcome = useRef<{ result: SkinAnalysisResult } | { code: string; stage: string; message: string } | null>(null);
   const idempotencyKey = useRef(analysisRequestKey ?? requestKey());
-  const scale = Math.max(0.9, Math.min(Math.min(width, 520) / 393, 1.08));
+  const scale = responsiveScale(width);
   const ringSize = Math.min(width - 96 * scale, 286 * scale);
   const photo = photoUri && !photoUnavailable ? { uri: photoUri } : null;
 
@@ -68,6 +71,13 @@ export default function AnalysisScreen() {
     try {
       if (!photoUri || photoUnavailable) {
         throw new AnalysisRequestError('photo-unavailable', 'Choose a photo again before requesting analysis.');
+      }
+      if (!developmentTestMode) {
+        const entitlement = await getVerifiedEntitlement();
+        if (!entitlement.active) {
+          router.replace({ pathname: '/paywall', params: { next: 'analysis' } });
+          return;
+        }
       }
       const result = await requestSkinAnalysis(
         photoUri,
@@ -95,7 +105,7 @@ export default function AnalysisScreen() {
       inFlight.current = false;
       if (active.current) setBusy(false);
     }
-  }, [acceptAnalysisResult, analysisPreferences, photoUnavailable, photoUploadConsent, photoUri, photoView]);
+  }, [acceptAnalysisResult, analysisPreferences, developmentTestMode, photoUnavailable, photoUploadConsent, photoUri, photoView]);
 
   useFocusEffect(useCallback(() => {
     active.current = true;
@@ -125,7 +135,10 @@ export default function AnalysisScreen() {
 
   const returnToPlans = () => router.replace('/paywall');
   const returnToUpload = () => backOrReplace('/upload');
-  const continueWithSignIn = () => router.push({ pathname: '/sign-in', params: { continueScan: 'true' } });
+  const continueWithSignIn = () => router.push({
+    pathname: '/sign-in',
+    params: { continueScan: 'true', ...(developmentTestMode ? { mode: 'development' } : {}) },
+  });
 
   if (busy) {
     return <CinematicSkinScanner onBack={returnToUpload} />;
@@ -135,7 +148,7 @@ export default function AnalysisScreen() {
     <View style={styles.screen}>
       <ScrollView contentContainerStyle={[styles.scroll, { minHeight: height }]} showsVerticalScrollIndicator={false}>
         <View style={[styles.page, { width: Math.min(width, 520), paddingHorizontal: 27 * scale, paddingTop: Math.max(insets.top, 14 * scale), paddingBottom: Math.max(insets.bottom, 22 * scale) }]}>
-          <Image source={require('../../assets/images/upload-sample.png')} style={StyleSheet.absoluteFill} resizeMode="cover" accessible={false} />
+          <Image source={require('../../assets/images/upload-sample.webp')} style={StyleSheet.absoluteFill} resizeMode="cover" accessible={false} />
           <LinearGradient colors={['rgba(10,10,10,0.83)', 'rgba(10,10,10,0.92)', '#0A0A0A']} locations={[0, 0.49, 1]} style={StyleSheet.absoluteFill} pointerEvents="none" />
           <Pressable accessibilityRole="button" accessibilityLabel="Back to selected photo" hitSlop={12} onPress={returnToUpload} style={[styles.back, { width: 44 * scale, height: 44 * scale }]}>
             <Svg width={25 * scale} height={25 * scale} viewBox="0 0 24 24" fill="none" stroke="#FFF" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><Path d="m15 18-6-6 6-6" /></Svg>
@@ -199,15 +212,15 @@ export default function AnalysisScreen() {
 
           {!busy && <View style={styles.actions}>
             {errorCode === 'authentication-required'
-              ? <Pressable accessibilityRole="button" onPress={continueWithSignIn} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
+              ? <Pressable accessibilityRole="button" onPress={continueWithSignIn} style={({ pressed }) => [styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale, opacity: pressed ? 0.84 : 1 }]}>
                 <LinearGradient colors={['#E8C9A0', '#D4B896']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>Sign in to continue</Text></LinearGradient>
               </Pressable>
               : errorCode === 'subscription-required'
-              ? <Pressable accessibilityRole="button" onPress={returnToPlans} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
+              ? <Pressable accessibilityRole="button" onPress={returnToPlans} style={({ pressed }) => [styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale, opacity: pressed ? 0.84 : 1 }]}>
                 <LinearGradient colors={['#E8C9A0', '#D4B896']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>View subscription options</Text></LinearGradient>
               </Pressable>
               : errorCode === 'rate-limited' || errorCode === 'admin-test-cap-reached'
-                ? <Pressable accessibilityRole="button" onPress={returnToUpload} style={[styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale }]}>
+                ? <Pressable accessibilityRole="button" onPress={returnToUpload} style={({ pressed }) => [styles.primaryButton, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 18 * scale, opacity: pressed ? 0.84 : 1 }]}>
                   <LinearGradient colors={['#E8C9A0', '#D4B896']} style={styles.buttonFill}><Text style={[styles.primaryText, { fontSize: 15 * scale }]}>Return to photo and free tools</Text></LinearGradient>
                 </Pressable>
               : errorCode === 'development-test-not-authorized' || errorCode === 'development-test-unavailable'

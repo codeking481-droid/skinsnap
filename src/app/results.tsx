@@ -5,12 +5,13 @@ import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePhoto } from '../PhotoContext';
 import { AnalysisReport } from '../components/AnalysisReport';
+import { responsiveScale } from '../responsive';
 
 export default function ResultsScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { analysisResult, photoUri, analysisPreferences, setAnalysisResult, setPhotoUri, setPhotoUploadConsent } = usePhoto();
-  const scale = Math.max(0.9, Math.min(Math.min(width, 520) / 393, 1.08));
+  const scale = responsiveScale(width);
   const retake = () => {
     setPhotoUri(null);
     setPhotoUploadConsent(false);
@@ -47,7 +48,7 @@ export default function ResultsScreen() {
               <Text style={[styles.body, { fontSize: 13 * scale, lineHeight: 20 * scale, marginTop: 12 * scale }]}>
                 SkinSnap never substitutes sample scores or invented observations for a real result. Start an analysis to view verified service results.
               </Text>
-              <Pressable accessibilityRole="button" onPress={() => router.replace('/upload')} style={[styles.cta, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 20 * scale }]}>
+              <Pressable accessibilityRole="button" onPress={() => router.replace('/upload')} style={({ pressed }) => [styles.cta, { minHeight: 52 * scale, borderRadius: 27 * scale, marginTop: 20 * scale, opacity: pressed ? 0.86 : 1 }]}>
                 <LinearGradient colors={['#E8C9A0', '#D4B896']} style={styles.ctaFill}>
                   <Text style={[styles.ctaText, { fontSize: 15 * scale }]}>Choose a photo</Text>
                   <Svg width={20 * scale} height={20 * scale} viewBox="0 0 24 24" fill="none" stroke="#11070C" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><Path d="M4 12h15m-6-6 6 6-6 6" /></Svg>

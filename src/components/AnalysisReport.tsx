@@ -17,6 +17,9 @@ const INSIGHT_SECTIONS = [
   { category: 'evenness', label: 'Evenness', observationCategories: ['uneven-looking-tone', 'color-variation'] },
   { category: 'blemishes', label: 'Blemish appearance', observationCategories: ['visible-blemishes'] },
 ] as const;
+const TIER_LABELS = ['Radiant', 'Great', 'Healthy', 'Balanced', 'Needs Care', 'Clear'] as const;
+const LIMITED_DETAIL_TITLE = 'Limited detail in this light';
+const LIMITED_DETAIL_TIP = 'Try soft window light, no direct sun, fill the oval for a clearer snapshot.';
 
 export function AnalysisReport({
   result,
@@ -91,6 +94,9 @@ export function AnalysisReport({
     <Text accessibilityRole="header" style={[styles.completed, { fontSize: 10 * scale }]}>ANALYZED {analyzedAt.toUpperCase()} · COSMETIC OBSERVATIONS</Text>
     <View style={[styles.snapshotWrap, { marginTop: 12 * scale, borderRadius: 16 * scale, padding: 14 * scale }]}>
       {photoUri && <Image source={{ uri: photoUri }} style={[styles.photoThumb, { width: 58 * scale, height: 58 * scale, borderRadius: 29 * scale }]} resizeMode="cover" />}
+      <View accessibilityLabel={result.imageQuality === 'clear' ? 'Photo quality: clear enough for review' : 'Photo quality: limited'} style={[styles.qualityPill, { borderRadius: 12 * scale, paddingHorizontal: 8 * scale, paddingVertical: 4 * scale, marginTop: photoUri ? 8 * scale : 0 }]}>
+        <Text style={[styles.qualityPillText, { fontSize: 9 * scale }]}>{result.imageQuality === 'clear' ? 'CLEAR PHOTO REVIEW' : 'LIMITED PHOTO DETAIL'}</Text>
+      </View>
       <Text style={[styles.snapshotTitle, { fontSize: 15 * scale, marginTop: photoUri ? 9 * scale : 0 }]}>Photo review</Text>
       <Text style={[styles.snapshotCaption, { fontSize: 10 * scale, marginTop: 3 * scale }]}>
         {result.imageQuality === 'clear' ? 'Photo detail was sufficient for review' : 'Photo detail was limited'}
@@ -107,10 +113,18 @@ export function AnalysisReport({
             <View key={section.category} style={[styles.insightCard, { borderRadius: 12 * scale, padding: 10 * scale }]}>
               <Text style={[styles.insightLabel, { fontSize: 10 * scale }]}>{section.label}</Text>
               <Text style={[styles.insightTier, { fontSize: 13 * scale, marginTop: 4 * scale }]}>
-                {insight?.tier ?? 'Not enough visual detail'}
+                {insight?.tier ?? LIMITED_DETAIL_TITLE}
               </Text>
+              {insight && <View accessibilityLabel={`${section.label}: reported appearance tier ${insight.tier}`} style={[styles.tierTrack, { marginTop: 8 * scale, height: 5 * scale, borderRadius: 4 * scale }]}>
+                {TIER_LABELS.map((level) => (
+                  <View key={level} style={[styles.tierDot, { width: `${100 / TIER_LABELS.length - 2}%`, height: 5 * scale, borderRadius: 4 * scale }, level === insight.tier && styles.tierDotActive]} />
+                ))}
+              </View>}
               {supporting.length > 0 && <Text style={[styles.insightEvidence, { fontSize: 9 * scale, lineHeight: 13 * scale, marginTop: 4 * scale }]}>
                 {supporting.map(item => item.observation).join(' ')}
+              </Text>}
+              {!insight && <Text style={[styles.insightEvidence, { fontSize: 9 * scale, lineHeight: 13 * scale, marginTop: 4 * scale }]}>
+                {LIMITED_DETAIL_TIP}
               </Text>}
             </View>
           );
@@ -128,6 +142,10 @@ export function AnalysisReport({
       <Text style={[styles.insightEvidence, { fontSize: 10 * scale, lineHeight: 14 * scale, marginTop: 8 * scale }]}>
         {result.disclaimer}
       </Text>
+      {result.limitations?.length ? <View style={[styles.limitations, { marginTop: 10 * scale, borderRadius: 12 * scale, padding: 10 * scale }]}>
+        <Text style={[styles.insightLabel, { fontSize: 10 * scale }]}>What may affect this report</Text>
+        {result.limitations.map((limitation, index) => <Text key={`${limitation}-${index}`} style={[styles.insightEvidence, { fontSize: 9 * scale, lineHeight: 13 * scale, marginTop: index ? 4 * scale : 5 * scale }]}>• {limitation}</Text>)}
+      </View> : null}
     </View>
 
     <View style={[styles.summaryCard, { borderRadius: 16 * scale, padding: 12 * scale, marginTop: 16 * scale }]}>
@@ -273,6 +291,8 @@ const styles = StyleSheet.create({
   completed: { color: '#E8C9A0', fontFamily: 'InterExtraBold', letterSpacing: 0.8, textAlign: 'center' },
   snapshotWrap: { width: '100%', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderColor: 'rgba(232,201,160,0.35)', borderWidth: 1, backgroundColor: '#151515' },
   photoThumb: { overflow: 'hidden', borderColor: '#E8C9A0', borderWidth: 1.5 },
+  qualityPill: { backgroundColor: 'rgba(232,201,160,0.14)', borderWidth: 1, borderColor: 'rgba(232,201,160,0.32)' },
+  qualityPillText: { color: '#E8C9A0', fontFamily: 'InterExtraBold', letterSpacing: 0.6 },
   snapshotTitle: { color: '#FFF', fontFamily: 'InterExtraBold', textAlign: 'center' },
   snapshotCaption: { color: '#AFAFAF', fontFamily: 'InterRegular', textAlign: 'center' },
   cosmeticSnapshot: { width: '100%', backgroundColor: '#17151B', borderColor: '#40364E', borderWidth: 1 },
@@ -281,7 +301,11 @@ const styles = StyleSheet.create({
   insightLabel: { color: '#C4B4D8', fontFamily: 'InterSemibold' },
   insightTier: { color: '#E8DDF4', fontFamily: 'InterExtraBold' },
   insightEvidence: { color: '#B9B2BD', fontFamily: 'InterRegular' },
+  tierTrack: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#39313F', overflow: 'hidden' },
+  tierDot: { backgroundColor: '#39313F' },
+  tierDotActive: { backgroundColor: '#B18BE4' },
   ageEstimate: { backgroundColor: '#211D27', borderWidth: 1, borderColor: '#39313F' },
+  limitations: { backgroundColor: '#1C1921', borderWidth: 1, borderColor: '#39313F' },
   summaryCard: { width: '100%', backgroundColor: '#1A1A1C', borderWidth: 1, borderColor: '#2A2A2C' },
   summaryTitle: { color: '#E8C9A0', fontFamily: 'InterSemibold' },
   summaryText: { color: '#D1D1D1', fontFamily: 'InterRegular' },

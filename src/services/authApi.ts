@@ -1,6 +1,9 @@
 import { clearSessionToken, ensureAuthenticatedSession, getSessionToken, saveAuthenticatedSession, sessionFailureMessage } from './session';
 import { parseAnalysisResult, type SkinAnalysisResult } from './analysisApi';
 import { deleteRoutineProgress } from '../routineStorage';
+import { readLocalValue, writeLocalValue } from '../platformStorage';
+
+const LOCAL_HISTORY_KEY = 'skinsnap_history';
 
 export class AuthApiError extends Error {
   constructor(message: string, readonly accountDeleted = false) {
@@ -16,9 +19,17 @@ function config() {
   const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim();
   const apiUrl = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, '');
   if (!supabaseUrl?.startsWith('https://') || !anonKey || !apiUrl?.startsWith('https://')) {
-    throw new AuthApiError('Secure account sign-in is not configured in this build yet.');
+    throw new AuthApiError('The account service is unavailable. You can continue with local SkinSnap features.');
   }
   return { supabaseUrl, anonKey, apiUrl };
+}
+
+async function loadLocalHistory(): Promise<AnalysisHistoryItem[]> {
+  const raw = await readLocalValue(LOCAL_HISTORY_KEY);
+  if (!raw) return [];
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map(item => parseAnalysisResult(item, { savedHistory: true }));
 }
 
 async function readErrorMessage(response: Response): Promise<string> {
@@ -102,27 +113,29 @@ export async function authenticateWithEmail(
 export type AnalysisHistoryItem = SkinAnalysisResult;
 
 export async function loadAnalysisHistory(): Promise<AnalysisHistoryItem[]> {
-  const { apiUrl } = config();
-  const session = await ensureAuthenticatedSession();
-  if (!session.valid) throw new AuthApiError(sessionFailureMessage(session));
-  const token = await getSessionToken();
-  if (!token) throw new AuthApiError('A secure guest session is required to view saved analysis history.');
-  let response: Response;
   try {
+    const { apiUrl } = config();
+    const session = await ensureAuthenticatedSession();
+    if (!session.valid) throw new AuthApiError(sessionFailureMessage(session));
+    const token = await getSessionToken();
+    if (!token) throw new AuthApiError('A secure guest session is required to view saved analysis history.');
+    let response: Response;
     response = await fetch(`${apiUrl}/v1/history`, {
       signal: AbortSignal.timeout(20000),
       headers: { Authorization: `Bearer ${token}` },
     });
+    if (response.status === 401) throw new AuthApiError('Your sign-in has expired. Sign in again to view your history.');
+    if (!response.ok) throw new AuthApiError('Analysis history is temporarily unavailable. Please retry.');
+    const payload: unknown = await response.json();
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !Array.isArray((payload as Record<string, unknown>).items)) {
+      throw new AuthApiError('The history service returned an invalid response.');
+    }
+    const history = ((payload as { items: unknown[] }).items).map((item) => parseAnalysisResult(item, { savedHistory: true }));
+    await writeLocalValue(LOCAL_HISTORY_KEY, JSON.stringify(history));
+    return history;
   } catch {
-    throw new AuthApiError('Could not reach analysis history. Check your connection and retry.');
+    return loadLocalHistory();
   }
-  if (response.status === 401) throw new AuthApiError('Your sign-in has expired. Sign in again to view your history.');
-  if (!response.ok) throw new AuthApiError('Analysis history is temporarily unavailable. Please retry.');
-  const payload: unknown = await response.json();
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !Array.isArray((payload as Record<string, unknown>).items)) {
-    throw new AuthApiError('The history service returned an invalid response.');
-  }
-  return ((payload as { items: unknown[] }).items).map((item) => parseAnalysisResult(item, { savedHistory: true }));
 }
 
 export async function deleteAccountData(): Promise<void> {

@@ -35,7 +35,7 @@ test('paywall legal actions do not open unverified environment URLs', async () =
 
 function billingFixture({ preview = false, configured = true, result, error, pending } = {}) {
   let purchases = 0; const exports = {};
-  const info = result ?? { entitlements: { active: { skinsnap_premium: { isActive: true, verification: 'VERIFIED', expirationDateMillis: Date.now() + 60000 } } } };
+  const info = result ?? { entitlements: { active: { 'SkinSnap Pro': { isActive: true, verification: 'VERIFIED', expirationDateMillis: Date.now() + 60000 } } } };
   const sdk = { isConfigured: async () => true, getCustomerInfo: async () => info, restorePurchases: async () => info,
     purchasePackage: async () => { purchases++; if (error) throw error; if (pending) await pending; return { customerInfo: info }; } };
   const code = ts.transpileModule(fs.readFileSync(new URL('../src/services/billing.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
@@ -51,7 +51,7 @@ test('billing rejects preview/unconfigured, inactive and unverified entitlements
   assert.equal((await billingFixture({ configured: false }).api.restorePurchases()).reason, 'unconfigured');
   const inactive = { entitlements: { active: {} } };
   assert.equal((await billingFixture({ result: inactive }).api.purchasePlan('weekly', {})).kind, 'inactive');
-  const unverified = { entitlements: { active: { skinsnap_premium: { isActive: true, verification: 'FAILED', expirationDateMillis: null } } } };
+  const unverified = { entitlements: { active: { 'SkinSnap Pro': { isActive: true, verification: 'FAILED', expirationDateMillis: null } } } };
   assert.equal((await billingFixture({ result: unverified }).api.getVerifiedEntitlement()).reason, 'unverified');
 });
 test('billing handles verified purchase/restore, cancellation and pending without fake success', async () => {

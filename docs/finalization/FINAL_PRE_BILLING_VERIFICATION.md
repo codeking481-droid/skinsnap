@@ -130,7 +130,7 @@ The public deletion page is deliberately disabled and marked as a review draft. 
 
 ## 15. Subscription gate and billing — PARTIAL / BLOCKED
 
-Code identifiers are `skinsnap_weekly`, `skinsnap_yearly`, optional `skinsnap_yearly_downsell`; entitlement is `skinsnap_premium`; offerings are `default` and `yearly_downsell`. Client logic checks verified entitlements, supports restore, distinguishes cancelled/pending/inactive/error, and does not claim a pending purchase succeeded. The Worker independently verifies the RevenueCat subscriber entitlement before production analysis.
+The app loads the weekly, monthly, and annual packages from RevenueCat's `default` offering; entitlement is `SkinSnap Pro`. Client logic checks verified entitlements, supports restore, distinguishes cancelled/pending/inactive/error, and does not claim a pending purchase succeeded. The Worker independently verifies the RevenueCat subscriber entitlement before production analysis.
 
 The client purchase gate `SUBSCRIPTION_PURCHASES_ENABLED` is **false**. The inspected production Worker secret list does **not** contain `REVENUECAT_SECRET_API_KEY`, required by the Worker entitlement check. Therefore production paid analysis cannot be considered billing-ready until the owner configures that server secret and verifies it safely. No product, price, entitlement, or purchase was changed or tested.
 

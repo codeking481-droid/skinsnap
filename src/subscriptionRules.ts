@@ -1,4 +1,4 @@
-export const PREMIUM_ENTITLEMENT_ID = 'skinsnap_premium';
+export const PREMIUM_ENTITLEMENT_ID = 'SkinSnap Pro';
 export const DEFAULT_OFFERING_ID = 'default';
 export const DOWNSELL_OFFERING_ID = 'yearly_downsell';
 

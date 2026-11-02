@@ -20,10 +20,12 @@ import { AuthApiError, authenticateWithEmail, deleteAccountData, signOut } from 
 import { isAnonymousSession, verifyAuthenticatedSession } from '../services/session';
 import { usePhoto } from '../PhotoContext';
 import { MINIMUM_USER_AGE } from '../privacy';
+import { responsiveScale } from '../responsive';
 
 export default function SignInScreen() {
-  const { continueScan: continueScanParam } = useLocalSearchParams<{ continueScan?: string }>();
+  const { continueScan: continueScanParam, mode: modeParam } = useLocalSearchParams<{ continueScan?: string; mode?: string }>();
   const continueScan = continueScanParam === 'true';
+  const developmentScan = continueScan && modeParam === 'development';
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { setPhotoUri, setPhotoUploadConsent, setAnalysisResult, setAnalysisPreferences } = usePhoto();
@@ -35,7 +37,7 @@ export default function SignInScreen() {
   const [anonymousSession, setAnonymousSession] = useState(false);
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const scale = Math.max(0.9, Math.min(Math.min(width, 520) / 393, 1.08));
+  const scale = responsiveScale(width);
 
   useEffect(() => {
     let active = true;
@@ -49,8 +51,11 @@ export default function SignInScreen() {
   }, []);
 
   const returnToPreviousScreen = () => {
-    if (router.canGoBack()) router.back();
-    else router.replace(continueScan ? '/analysis' : '/routine');
+    if (continueScan) {
+      router.replace({ pathname: '/analysis', ...(developmentScan ? { params: { mode: 'development' } } : {}) });
+      return;
+    }
+    router.replace('/');
   };
 
   const submit = async () => {

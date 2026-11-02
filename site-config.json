@@ -1,0 +1,10 @@
+{
+  "app_name": "SkinSnap",
+  "package_name": "com.skinsnap.app",
+  "support_email": "alphatekxcompany@gmail.com",
+  "privacy_policy_url": "https://skinsnap-legal.pages.dev/privacy-policy.html",
+  "terms_of_service_url": "https://skinsnap-legal.pages.dev/terms-of-service.html",
+  "account_deletion_url": "https://skinsnap-legal.pages.dev/account-deletion.html",
+  "legal_publication_approval": true,
+  "account_deletion_enabled": true
+}

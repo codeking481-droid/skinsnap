@@ -93,7 +93,7 @@ export default function SettingsScreen() {
       setSubscriptionStatus(entitlement.active
         ? activeSubscriptionLabel(entitlement.customerInfo, billingState)
         : entitlement.reason === 'unconfigured'
-          ? 'Store billing is not configured in this build'
+          ? 'Store billing is temporarily unavailable'
           : entitlement.reason === 'preview'
             ? 'Available in a native store build'
             : entitlement.reason === 'error'
@@ -122,7 +122,7 @@ export default function SettingsScreen() {
           : result.reason === 'preview'
             ? 'Restore is available in a native Android or iOS build, not Expo Go.'
             : result.reason === 'unconfigured'
-              ? 'Store restore is unavailable because billing is not configured for this build.'
+              ? 'Store restore is temporarily unavailable. Please try again later.'
               : 'The store could not verify purchases. Check your connection and try again.');
       await refresh();
     } catch {

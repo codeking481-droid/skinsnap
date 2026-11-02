@@ -31,7 +31,7 @@ export function getCreams(
   const ideas = [
     bootsIdea('CeraVe Moisturising Cream', 'Common UK moisturiser pick to explore. Follow its label and stop if irritation occurs.'),
     bootsIdea('The Ordinary Hyaluronic Acid 2% + B5', 'Common UK moisture-focused serum pick to explore; use as directed on its label.'),
-    bootsIdea('La Roche-Posay Anthelios UVMune 400 SPF50+', 'Broad-spectrum SPF pick to explore year-round, including on overcast days. Follow the label and reapply as directed.'),
+    bootsIdea('La Roche-Posay Anthelios UVMune 400 SPF50+', 'SPF 50 sun care to explore. Follow the label. If you stay outside, apply again after 2 hours.'),
   ];
   const categories = new Set(observations.map(item => item.category));
   let targeted: ProductIdea | null = null;

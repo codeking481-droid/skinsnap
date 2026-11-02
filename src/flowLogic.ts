@@ -48,13 +48,9 @@ export function sanitizeRoutineProgress(value: unknown): RoutineProgress {
   const empty: RoutineProgress = { checkedSteps: [], completedDays: [] };
   if (!value || typeof value !== 'object') return empty;
   const data = value as Record<string, unknown>;
-  const legacySteps = new Set([
-    'Morning-Cleanser', 'Morning-Toner', 'Morning-Serum', 'Morning-Moisturizer', 'Morning-Sunscreen',
-    'Evening-Cleanser', 'Evening-Toner', 'Evening-Serum', 'Evening-Moisturizer',
-  ]);
   const validStep = (item: unknown): item is string =>
     typeof item === 'string'
-    && (legacySteps.has(item) || /^(Morning|Evening)-[1-8]$/.test(item) || /^step-[a-zA-Z0-9-]{1,80}$/.test(item));
+    && (/^(Morning|Evening)-[1-8]$/.test(item) || /^step-[a-zA-Z0-9-]{1,80}$/.test(item));
   const validDates = (item: unknown): item is string => {
     if (typeof item !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(item)) return false;
     const date = new Date(`${item}T00:00:00Z`);

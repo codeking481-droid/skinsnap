@@ -7,8 +7,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { loadPreferences, markOnboardingComplete, saveOnboardingSkinType, saveOnboardingStep, type SkinType } from '../preferences';
 import { getNextAppFlowRoute, getOnboardingResumeStep } from '../flowLogic';
 import { MINIMUM_USER_AGE } from '../privacy';
+import { responsiveScale } from '../responsive';
 
-const portrait = require('../../assets/images/upload-sample.png');
+const portrait = require('../../assets/images/upload-sample.webp');
 const skinTypes: { value: SkinType; title: string; detail: string; icon: 'shine' | 'drop' | 'mix' | 'heart' | 'balance' | 'question' }[] = [
   { value: 'oily', title: 'Oily', detail: 'Shiny through the day', icon: 'shine' },
   { value: 'dry', title: 'Dry', detail: 'Tight or flaky feeling', icon: 'drop' },
@@ -50,7 +51,7 @@ function SkinIcon({ name, size = 30 }: { name: string; size?: number }) {
 
 function PrimaryButton({ label, onPress, scale, disabled = false }: { label: string; onPress: () => void; scale: number; disabled?: boolean }) {
   return (
-    <Pressable accessibilityRole="button" disabled={disabled} onPress={onPress} style={({ pressed }) => [styles.primaryButton, { minHeight: 56 * scale, borderRadius: 30 * scale, opacity: disabled ? 0.45 : pressed ? 0.86 : 1 }]}>
+    <Pressable accessibilityRole="button" accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={({ pressed }) => [styles.primaryButton, { minHeight: 56 * scale, borderRadius: 30 * scale, opacity: disabled ? 0.45 : pressed ? 0.86 : 1 }]}>
       <LinearGradient colors={['#E8C9A0', '#D4B896']} style={[StyleSheet.absoluteFill, { borderRadius: 30 * scale }]} />
       <Text style={[styles.primaryLabel, { fontSize: 18 * scale }]}>{label}</Text>
       <Text style={[styles.primaryArrow, { fontSize: 24 * scale }]}>→</Text>
@@ -72,7 +73,7 @@ export default function OnboardingScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const pageWidth = Math.min(width, 520);
-  const scale = Math.max(0.88, Math.min(pageWidth / 393, 1.08));
+  const scale = responsiveScale(pageWidth);
 
   useEffect(() => {
     let active = true;
@@ -224,7 +225,7 @@ export default function OnboardingScreen() {
                 {skinTypes.map((item) => {
                   const selected = skinType === item.value;
                   return (
-                    <Pressable key={item.value} accessibilityRole="radio" accessibilityState={{ checked: selected }} onPress={() => { void selectSkinType(item.value); }} style={[styles.skinCard, selected && styles.skinCardSelected, { minHeight: 112 * scale, borderRadius: 20 * scale, padding: 13 * scale }]}>
+                    <Pressable key={item.value} accessibilityRole="radio" accessibilityState={{ checked: selected }} accessibilityLabel={`${item.title}: ${item.detail}`} onPress={() => { void selectSkinType(item.value); }} style={({ pressed }) => [styles.skinCard, selected && styles.skinCardSelected, { minHeight: 112 * scale, borderRadius: 20 * scale, padding: 13 * scale, opacity: pressed ? 0.84 : 1 }]}>
                       <View style={[styles.skinIcon, { width: 39 * scale, height: 39 * scale, borderRadius: 14 * scale }, selected && styles.skinIconSelected]}><SkinIcon name={item.icon} size={24 * scale} /></View>
                       <View style={{ flex: 1, marginLeft: 10 * scale }}>
                         <Text style={[styles.skinTitle, { fontSize: 15 * scale }, selected && styles.skinTitleSelected]}>{item.title}</Text>
@@ -254,7 +255,7 @@ export default function OnboardingScreen() {
                   { icon: 'sparkle', title: 'Review gentle insights', copy: 'With your consent, receive non-medical observations—not a diagnosis.' },
                   { icon: 'routine', title: 'Build a simple routine', copy: 'Use your goals and preferences to guide everyday care.' },
                 ].map((item, index) => (
-                  <View key={item.title} style={[styles.howCard, { borderRadius: 20 * scale, padding: 16 * scale, minHeight: 108 * scale }]}>
+                  <View key={item.title} accessibilityLabel={`${index + 1}. ${item.title}. ${item.copy}`} style={[styles.howCard, { borderRadius: 20 * scale, padding: 16 * scale, minHeight: 108 * scale }]}>
                     <View style={[styles.howIcon, { width: 54 * scale, height: 54 * scale, borderRadius: 27 * scale }, index === 1 && styles.howIconPurple]}><SkinIcon name={item.icon} size={30 * scale} /></View>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.howTitle, { fontSize: 16 * scale }]}>{index + 1}. {item.title}</Text>
@@ -280,7 +281,7 @@ export default function OnboardingScreen() {
                   { icon: 'drop', title: 'Cosmetic, not medical', copy: 'SkinSnap offers general visible-skin observations and is not a substitute for professional care.' },
                   { icon: 'heart', title: 'Your goals guide the experience', copy: 'Skin type and preferences are self-described. SkinSnap does not infer identity from your face.' },
                 ].map((item) => (
-                  <View key={item.title} style={[styles.privacyCard, { borderRadius: 18 * scale, padding: 14 * scale, gap: 12 * scale }]}>
+                  <View key={item.title} accessibilityLabel={`${item.title}. ${item.copy}`} style={[styles.privacyCard, { borderRadius: 18 * scale, padding: 14 * scale, gap: 12 * scale }]}>
                     <View style={[styles.privacyIcon, { width: 42 * scale, height: 42 * scale, borderRadius: 15 * scale }]}><SkinIcon name={item.icon} size={23 * scale} /></View>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.privacyTitle, { fontSize: 14 * scale }]}>{item.title}</Text>

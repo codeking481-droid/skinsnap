@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { responsiveScale } from '../responsive';
 import { loadRoutineProgress, type RoutineProgress } from '../routineStorage';
 import { loadAnalysisHistory, type AnalysisHistoryItem, AuthApiError } from '../services/authApi';
 import { getRoutineProgressOwner } from '../services/userDataApi';
@@ -43,7 +44,7 @@ export default function ProgressScreen() {
   const [diaryLoading, setDiaryLoading] = useState(true);
   const [diaryError, setDiaryError] = useState<string | null>(null);
   const [routineMessage, setRoutineMessage] = useState('Loading your routine history…');
-  const scale = Math.max(0.9, Math.min(Math.min(width, 520) / 393, 1.08));
+  const scale = responsiveScale(width);
   const now = new Date();
   const week = getProgressWeek(progress.completedDays, now);
   const completedThisWeek = week.filter(day => day.completed).length;

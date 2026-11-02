@@ -10,9 +10,13 @@
     "ios": {
       "supportsTablet": true
     },
+    "androidStatusBar": {
+      "translucent": true
+    },
     "android": {
-      "package": "com.alphatekx.skinsnap",
-      "versionCode": 1,
+      "package": "com.skinsnap.app",
+      "versionCode": 6,
+      "edgeToEdgeEnabled": true,
       "allowBackup": false,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-foreground.png",
@@ -20,7 +24,8 @@
         "backgroundColor": "#08090D"
       },
       "permissions": [
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "com.android.vending.BILLING"
       ],
       "blockedPermissions": [
         "android.permission.READ_EXTERNAL_STORAGE",
@@ -68,10 +73,34 @@
           "microphonePermission": false
         }
       ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "targetSdkVersion": 36,
+            "enableProguardInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "enableMinifyInReleaseBuilds": true,
+            "enablePngCrunchInReleaseBuilds": true,
+            "useLegacyPackaging": false,
+            "extraProguardRules": "-keep class com.facebook.hermes.** { *; }\n-keep class com.swmansion.reanimated.** { *; }"
+          }
+        }
+      ],
       "expo-font",
       "expo-status-bar",
-      "expo-web-browser",
       "expo-secure-store"
-    ]
+    ],
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": false
+        }
+      },
+      "eas": {
+        "projectId": "3671a7f1-1871-4151-9761-7ed212444bb5"
+      }
+    },
+    "owner": "alphatekx"
   }
 }

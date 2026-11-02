@@ -1,3 +1,34 @@
+import { readLocalValue, writeLocalValue } from './platformStorage';
+
+const LOCAL_GUEST_ID_KEY = 'skinsnap_guest_id';
+
+export type LocalGuestUser = {
+  id: string;
+  isGuest: true;
+};
+
+function createGuestId(): string {
+  return `guest_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export async function getOrCreateLocalGuestUser(): Promise<LocalGuestUser> {
+  let existing: string | null = null;
+  try {
+    existing = await readLocalValue(LOCAL_GUEST_ID_KEY);
+  } catch {
+    existing = null;
+  }
+  const id = existing?.startsWith('guest_') ? existing : createGuestId();
+  if (!existing) {
+    try {
+      await writeLocalValue(LOCAL_GUEST_ID_KEY, id);
+    } catch {
+      // Local guest access still works for the current session when persistence is unavailable.
+    }
+  }
+  return { id, isGuest: true };
+}
+
 export type AnonymousSessionTokens = {
   accessToken: string;
   refreshToken: string;
@@ -21,7 +52,7 @@ export class AnonymousAuthError extends Error {
       : reason === 'rate-limited'
         ? 'Too many guest sign-in attempts. Please wait a moment and try again.'
         : reason === 'configuration'
-          ? 'Secure guest access is not configured in this build.'
+          ? 'Guest access is temporarily unavailable. You can continue using local SkinSnap features.'
           : reason === 'invalid-response'
             ? 'The secure account service returned an invalid guest session.'
             : 'The secure account service is unavailable. Please try again.');

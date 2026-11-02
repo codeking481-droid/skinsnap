@@ -55,7 +55,8 @@ test('partial observations omit absent optional explanation and suggestion', () 
 
 test('empty and limited reports use honest non-fabricated observation messages', () => {
   assert.match(noObservationMessage('clear'), /does not add guesses/i);
-  assert.match(noObservationMessage('limited'), /not provide enough detail/i);
+  assert.match(noObservationMessage('limited'), /limited detail in this light/i);
+  assert.match(noObservationMessage('limited'), /soft window light/i);
 });
 
 test('long AI summaries and observations are preserved without truncation', () => {

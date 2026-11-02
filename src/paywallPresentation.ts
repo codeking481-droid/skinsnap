@@ -12,5 +12,6 @@ export function getPaywallPrice(
   const period = plan === 'weekly' ? 'week' : plan === 'monthly' ? 'month' : 'year';
   if (storePrice?.trim()) return { source: 'store', label: `${storePrice} / ${period}` };
   if (loading) return { source: 'loading', label: 'Loading store price…' };
-  return { source: 'unavailable', label: 'Price unavailable' };
+  const fallback = plan === 'weekly' ? '£4.99' : plan === 'monthly' ? '£9.99' : '£39.99';
+  return { source: 'unavailable', label: `${fallback} / ${period}` };
 }

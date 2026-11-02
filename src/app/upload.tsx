@@ -16,7 +16,7 @@ import {
 import { Camera, CameraView, type CameraType, type FlashMode, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePhoto } from '../PhotoContext';
@@ -27,11 +27,17 @@ import { loadSkinPreferences } from '../services/retentionApi';
 import { isAdultEligibilityConfirmed, MINIMUM_USER_AGE, PHOTO_ANALYSIS_CONSENT_VERSION } from '../privacy';
 import { loadPreferences } from '../preferences';
 import { AnalysisPreferencesForm } from '../components/AnalysisPreferencesForm';
+import { developmentAnalysisEnabled } from '../releasePolicy';
+import { getVerifiedEntitlement } from '../services/billing';
+import { responsiveScale } from '../responsive';
 
 export default function UploadScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const scale = Math.max(0.9, Math.min(Math.min(width, 520) / 393, 1.08));
+  const params = useLocalSearchParams<{ test?: string }>();
+  const liveTest = developmentAnalysisEnabled(__DEV__, process.env.EXPO_PUBLIC_AI_DEV_TEST_MODE)
+    && params.test === 'live';
+  const scale = responsiveScale(width);
   const { photoUri, setPhotoUri, photoUploadConsent, setPhotoUploadConsent, setAnalysisResult, analysisPreferences, setAnalysisPreferences, photoView, setPhotoView } = usePhoto();
   const [permission, requestPermission] = useCameraPermissions();
   const [refreshedPermission, setRefreshedPermission] = useState<typeof permission>(null);
@@ -46,6 +52,7 @@ export default function UploadScreen() {
   const [showScanInfo, setShowScanInfo] = useState(false);
   const [screenFocused, setScreenFocused] = useState(true);
   const [ageGateReady, setAgeGateReady] = useState(false);
+  const [scanAccessChecked, setScanAccessChecked] = useState(false);
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -75,6 +82,22 @@ export default function UploadScreen() {
       setCameraReady(false);
       setIsSwitchingCamera(false);
     };
+  }, []));
+
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    setScanAccessChecked(false);
+    void getVerifiedEntitlement().then(entitlement => {
+      if (!active) return;
+      if (!entitlement.active) {
+        router.replace({ pathname: '/paywall', params: { next: 'analysis' } });
+        return;
+      }
+      setScanAccessChecked(true);
+    }).catch(() => {
+      if (active) router.replace({ pathname: '/paywall', params: { next: 'analysis' } });
+    });
+    return () => { active = false; };
   }, []));
 
   useFocusEffect(useCallback(() => {
@@ -141,13 +164,13 @@ export default function UploadScreen() {
   }, []);
 
   useEffect(() => {
-    if (!ageGateReady || !screenFocused || !appActive || !cameraPermission?.granted || photoUri || cameraError || cameraReady) return;
+    if (!ageGateReady || !scanAccessChecked || !screenFocused || !appActive || !cameraPermission?.granted || photoUri || cameraError || cameraReady) return;
     const timeout = setTimeout(() => {
       setIsSwitchingCamera(false);
       setCameraError('The camera is taking longer than expected to start. Try again or choose a photo from your gallery.');
     }, 15_000);
     return () => clearTimeout(timeout);
-  }, [ageGateReady, appActive, cameraError, cameraPermission?.granted, cameraReady, photoUri, screenFocused]);
+  }, [ageGateReady, appActive, cameraError, cameraPermission?.granted, cameraReady, photoUri, scanAccessChecked, screenFocused]);
 
   useFocusEffect(
     useCallback(() => {
@@ -185,6 +208,10 @@ export default function UploadScreen() {
 
       const proceed = () => {
         setPhotoUploadConsent(true);
+        if (liveTest) {
+          router.replace({ pathname: '/analysis', params: { mode: 'development' } });
+          return;
+        }
         router.push({ pathname: '/paywall', params: { next: 'analysis' } });
       };
       if (quality.check.warnings.length) Alert.alert('A retake may help', quality.check.message, [{ text: 'Retake', onPress: retakePhoto }, { text: 'Use this photo', onPress: proceed }]);
@@ -195,7 +222,7 @@ export default function UploadScreen() {
   };
 
   const takePhoto = async () => {
-    if (!ageGateReady || captureInProgress.current || isCapturing || !cameraReady || !cameraRef.current) return;
+    if (!ageGateReady || !scanAccessChecked || captureInProgress.current || isCapturing || !cameraReady || !cameraRef.current) return;
     captureInProgress.current = true;
     setIsCapturing(true);
     try {
@@ -266,14 +293,14 @@ export default function UploadScreen() {
     setFramingConfirmed(false);
   };
 
-  if (!ageGateReady) {
+  if (!ageGateReady || !scanAccessChecked) {
     return (
       <View style={styles.screen}>
         <LinearGradient colors={['#151515', '#0A0A0A']} style={StyleSheet.absoluteFill} />
         <View style={[styles.permissionCard, { width: Math.min(width - 32, 360), paddingTop: Math.max(insets.top, 24), paddingBottom: 28 }]}>
-          <Text style={[styles.permissionEyebrow, { fontSize: 12 * scale }]}>18+ age requirement</Text>
-          <Text style={[styles.permissionTitle, { fontSize: 24 * scale, lineHeight: 31 * scale }]}>Checking your eligibility</Text>
-          <Text style={[styles.permissionText, { fontSize: 14 * scale, lineHeight: 20 * scale }]}>Confirm that you are at least 18 in onboarding before using Scan.</Text>
+          <Text style={[styles.permissionEyebrow, { fontSize: 12 * scale }]}>PREMIUM SCAN</Text>
+          <Text style={[styles.permissionTitle, { fontSize: 24 * scale, lineHeight: 31 * scale }]}>Checking your access</Text>
+          <Text style={[styles.permissionText, { fontSize: 14 * scale, lineHeight: 20 * scale }]}>Confirming your subscription before opening Scan.</Text>
         </View>
       </View>
     );
@@ -495,12 +522,12 @@ export default function UploadScreen() {
           <Text style={[styles.readinessHint, { fontSize: 10 * scale }]}>No glasses</Text>
           <Text style={[styles.readinessHint, { fontSize: 10 * scale }]}>Hair back</Text>
         </View>
-        <Pressable accessibilityRole="button" accessibilityState={{ disabled: isCapturing || !cameraReady }} onPress={takePhoto} disabled={isCapturing || !cameraReady} style={[styles.captureButton, { minHeight: 68 * scale, borderRadius: 36 * scale, marginTop: 8 * scale, opacity: isCapturing || !cameraReady ? 0.65 : 1 }]}>
+        <Pressable accessibilityRole="button" accessibilityLabel={isCapturing ? 'Capturing photo' : cameraReady ? 'Capture photo' : 'Camera starting'} accessibilityState={{ disabled: isCapturing || !cameraReady }} onPress={takePhoto} disabled={isCapturing || !cameraReady} style={({ pressed }) => [styles.captureButton, { minHeight: 68 * scale, borderRadius: 36 * scale, marginTop: 8 * scale, opacity: isCapturing || !cameraReady ? 0.65 : pressed ? 0.84 : 1 }]}>
             <Svg width={22 * scale} height={22 * scale} viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><Path d="M4 8h3l2-3h6l2 3h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z" /><Circle cx="12" cy="13" r="4" /></Svg>
             <Text style={[styles.captureLabel, { fontSize: 18 * scale }]}>{isCapturing ? 'Capturing…' : cameraError ? 'Camera unavailable' : isSwitchingCamera ? 'Switching camera…' : cameraReady ? 'Capture' : 'Starting camera…'}</Text>
         </Pressable>
         <View style={[styles.captureFooter, { marginTop: 3 * scale }]}>
-            <Pressable accessibilityRole="button" onPress={chooseFromGallery} style={styles.galleryLink}><Text style={styles.galleryLinkText}>Choose from gallery</Text></Pressable>
+            <Pressable accessibilityRole="button" onPress={chooseFromGallery} style={({ pressed }) => [styles.galleryLink, pressed && { opacity: 0.7 }]}><Text style={styles.galleryLinkText}>Choose from gallery</Text></Pressable>
             <Pressable accessibilityRole="button" accessibilityLabel={isSwitchingCamera ? 'Switching camera' : facing === 'front' ? 'Switch to rear camera' : 'Switch to front camera'} accessibilityState={{ disabled: isCapturing || isSwitchingCamera }} disabled={isCapturing || isSwitchingCamera} onPress={flipCamera} style={styles.cameraUtility}><Text style={styles.utilityText}>{isSwitchingCamera ? 'Switching…' : 'Flip camera'}</Text></Pressable>
             {facing === 'back' && <Pressable accessibilityRole="button" onPress={() => setFlash(current => current === 'off' ? 'on' : 'off')} style={styles.cameraUtility}><Text style={styles.utilityText}>{flash === 'off' ? 'Flash off' : 'Flash on'}</Text></Pressable>}
             {cameraError && <Pressable accessibilityRole="button" onPress={() => {
